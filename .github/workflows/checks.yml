@@ -32,6 +32,7 @@ jobs:
         shell: powershell
         run: |
           ./tests/check-readonly.ps1
+          ./tests/node-version.ps1
           ./tests/python-version.ps1
           ./tests/windows-regression.ps1
       - name: PowerShell 7 parse check
