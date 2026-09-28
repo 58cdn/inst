@@ -3,8 +3,11 @@ $root = Split-Path $PSScriptRoot -Parent
 foreach ($file in @('install.ps1', 'scripts\install-windows.ps1')) {
   $tokens = $null
   $errors = $null
-  [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $file), [ref]$tokens, [ref]$errors) | Out-Null
+  $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $file), [ref]$tokens, [ref]$errors)
   if ($errors.Count) { throw "$file`n$($errors | Out-String)" }
+  # PowerShell reads CJK letters right after "$name" as part of the variable name; write "${name}" there.
+  $names = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -match '[^\x00-\x7F]' }, $true))
+  if ($names.Count) { throw "$file uses non-ASCII variable names: $(($names | ForEach-Object { $_.Extent.Text }) -join ', ')" }
 }
 # The bootstrap must stay ASCII so `irm | iex` works regardless of the console code page.
 if ([IO.File]::ReadAllBytes((Join-Path $root 'install.ps1')) | Where-Object { $_ -gt 127 }) { throw 'install.ps1 contains non-ASCII bytes' }

@@ -57,7 +57,7 @@ $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; 
 ### 1. Node.js
 
 - macOS / Linux：nvm → Node.js LTS → corepack / npm 安装 pnpm。
-- Windows：nvm-windows（默认 1.2.2 免安装包，可用 `INST_NVM_WINDOWS_VERSION` 指定；2.x 自动改用 `nvm config set` 配置镜像）。
+- Windows：nvm-windows（默认 1.2.2 免安装包，可用 `INST_NVM_WINDOWS_VERSION` 指定；2.x 自动改用 `nvm config set` 配置镜像）。已有独立安装的 Node.js 时与 nvm-windows 冲突，脚本会停止并提示先卸载（不会自动卸载）；`-DryRun` 只给出警告并继续预览。
 
 ### 2. Python
 

@@ -533,12 +533,12 @@ mirror_system(){
   local site="$target"
   [[ "$target" == https://* ]] || site="$(mirror_site "$target")" || { err "未知镜像: $target"; return 2; }
   if [[ "$target" == tuna ]] && [[ "$DISTRO_ID" == rocky || "$DISTRO_ID" == almalinux ]]; then
-    warn "清华镜像不提供 $DISTRO_ID，改用阿里云"; target=aliyun; site="$(mirror_site aliyun)"
+    warn "清华镜像不提供 ${DISTRO_ID}，改用阿里云"; target=aliyun; site="$(mirror_site aliyun)"
   fi
   assert_https "$site" SYSTEM_MIRROR || return 2
   site="${site%/}"
   local rocky_path=rockylinux; [[ "$target" == ustc ]] && rocky_path=rocky
-  log "将为 ${DISTRO_ID} 替换系统源为 $site，原文件备份为 *.inst.bak："
+  log "将为 ${DISTRO_ID} 替换系统源为 ${site}，原文件备份为 *.inst.bak："
   printf '  %s\n' $files
   if ((!APPLY_SYSTEM_MIRROR)) && ! confirm '确认修改系统源'; then
     warn '未修改系统源；非交互模式请追加 --apply-system-mirror'; return 0
@@ -555,7 +555,7 @@ mirror_system(){
       ((DRY_RUN)) || { [[ -f /etc/pacman.d/mirrorlist.inst.bak ]] || as_root cp /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.inst.bak; }
       printf 'Server = %s/archlinux/$repo/os/$arch\n' "$site" | { if ((DRY_RUN)); then cat; else as_root tee /etc/pacman.d/mirrorlist >/dev/null; fi; }
       ok '已更新 pacman mirrorlist'; return 0;;
-    *) err "暂不支持 $DISTRO_ID，可使用 https://linuxmirrors.cn"; return 2;;
+    *) err "暂不支持 ${DISTRO_ID}，可使用 https://linuxmirrors.cn"; return 2;;
   esac
   while IFS= read -r f; do
     if ((!DRY_RUN)) && [[ ! -f "$f.inst.bak" ]]; then as_root cp "$f" "$f.inst.bak"; fi
@@ -617,7 +617,7 @@ agent_lookup(){
 agent_ids(){ printf '%s\n' "$AGENT_TABLE" | cut -d'|' -f1; }
 install_agent(){
   local id="$1" method="${2:-$AGENT_METHOD}"
-  agent_lookup "$id" || { err "未知 Agent: $id（可选: $(agent_ids | paste -sd, -)）"; return 2; }
+  agent_lookup "$id" || { err "未知 Agent: ${id}（可选: $(agent_ids | paste -sd, -)）"; return 2; }
   # auto：海外优先官方脚本；中国区域优先 npm（走镜像），官方脚本多依赖 GitHub / GCS。
   if [[ "$method" == auto ]]; then
     if [[ -n "$AGENT_SCRIPT" && ( "$REGION" != cn || -z "$AGENT_NPM" ) ]]; then method=official; else method=npm; fi
@@ -963,10 +963,10 @@ self_update(){
     return 2
   fi
   assert_https "$BASE_URL" INST_RAW_BASE_URL || return 2
-  if ((DRY_RUN)); then log "将下载并校验 $BASE_URL/scripts/install-unix.sh，再替换 $target（旧版备份为 $target.bak）"; return 0; fi
+  if ((DRY_RUN)); then log "将下载并校验 $BASE_URL/scripts/install-unix.sh，再替换 ${target}（旧版备份为 $target.bak）"; return 0; fi
   local current; current="$(script_version "$target")"
   if [[ -z "${INST_FORCE_UPDATE:-}" && -n "$current" ]] && fetch_remote_version && ! version_gt "$REMOTE_VERSION" "$current"; then
-    ok "已是最新版本 v$current（INST_FORCE_UPDATE=1 可强制重新下载）"; return 0
+    ok "已是最新版本 v${current}（INST_FORCE_UPDATE=1 可强制重新下载）"; return 0
   fi
   # 与 kejilion.sh 相同的防护：先下载到临时文件，校验非空、shebang、版本号与语法后再替换，并保留备份。
   local tmp; tmp="$(mktemp "${target}.tmp.XXXXXX")"
@@ -988,7 +988,7 @@ install_shortcut(){
   elif [[ ! -f "$SHORTCUT_PATH" ]]; then curl --proto '=https' -fsSL "$BASE_URL/scripts/install-unix.sh" -o "$SHORTCUT_PATH"; fi
   chmod +x "$SHORTCUT_PATH"
   env_path localbin "$BIN_DIR"
-  ok "已安装 $SHORTCUT_PATH，新终端中输入 $SHORTCUT_NAME 即可打开菜单"
+  ok "已安装 ${SHORTCUT_PATH}，新终端中输入 $SHORTCUT_NAME 即可打开菜单"
 }
 AUTO_UPDATE_TAG='# inst-auto-update'
 auto_update(){
@@ -1199,7 +1199,7 @@ inst v$INST_VERSION  跨平台开发环境 & AI Agents 安装器
   --node                 nvm、Node.js LTS、npm、pnpm
   --python               pyenv、Python 最新稳定版、Miniconda
   --mirrors              npm / pip / conda / nvm / pyenv 镜像（中国区域自动启用）
-  --agents               Agents CLI（默认 $DEFAULT_AGENTS）
+  --agents               Agents CLI（默认 ${DEFAULT_AGENTS}）
   --desktop              Claude / Codex 桌面端
   --endpoint LIST        为 Agent 写入地址配置: claude,codex,gemini,opencode,pi,openai
   --check                只读环境检查

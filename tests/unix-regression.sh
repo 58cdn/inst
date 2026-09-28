@@ -19,6 +19,11 @@ fail(){ echo "FAIL: $*" >&2; exit 1; }
 
 [[ "$(inst --version)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '--version'
 grep -q "^INST_VERSION=\"$(tr -d '[:space:]' < "$root/VERSION")\"$" "$root/scripts/install-unix.sh" || fail 'VERSION file mismatch'
+# macOS libc treats bytes 0x80-0xFF as letters in UTF-8 locales, so bash reads an unbraced
+# $NAME directly followed by non-ASCII text (e.g. a full-width comma) as a longer, unset name,
+# which is fatal under set -u; zsh does the same with CJK letters. Write ${NAME} there.
+unbraced=$(cd "$root" && LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^[:print:][:space:]]' install.sh install.zsh scripts/*.sh tests/*.sh || true)
+[[ -z "$unbraced" ]] || fail "unbraced variable before non-ASCII text:"$'\n'"$unbraced"
 
 inst --all --dry-run > "$scratch/dry-run"
 grep -q 'Miniconda3-latest-MacOSX-arm64.sh' "$scratch/dry-run" || fail 'mac miniconda url'

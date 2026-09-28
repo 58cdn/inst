@@ -282,7 +282,10 @@ function Install-Node {
   if (-not $nvmExe) {
     $existingNode = Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($existingNode) {
-      throw "检测到独立安装的 Node.js ($($existingNode.Source))，与 nvm-windows 冲突。请先在「应用和功能」中卸载后重试；脚本不会自动卸载。"
+      $conflict = "检测到独立安装的 Node.js ($($existingNode.Source))，与 nvm-windows 冲突。请先在「应用和功能」中卸载后重试；脚本不会自动卸载。"
+      if (-not $DryRun) { throw $conflict }
+      # 预览只提示，继续列出后续步骤
+      Write-Warn "实际运行会在此停止：$conflict"
     }
     if ($nvmHome -match ' ' -or $symlink -match ' ') { Write-Warn 'nvm-windows 不支持含空格的路径，可设置 NVM_HOME / NVM_SYMLINK 环境变量指定其他目录' }
     # nvm-windows 2.x 只提供安装器（且为社区未签名构建），这里固定使用 1.x 的免安装包。
