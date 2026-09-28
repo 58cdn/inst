@@ -122,6 +122,14 @@ API Key 只从环境变量 `INST_API_KEY` 或隐藏输入读取，不接受命�
 - 远端版本不高于本地时跳过；设 `INST_FORCE_UPDATE=1` 可强制下载。
 - 每日自动更新：Unix 使用 crontab，在 04 点的随机分钟执行；Windows 使用计划任务。
 
+### 8. 自动同步安装依赖版本
+
+- `.github/workflows/sync-versions.yml` 每周一 03:17（UTC）运行，也支持手动触发。
+- `tools/update-versions.mjs` 查询 GitHub Releases，只选择稳定且包含 `nvm-noinstall.zip` 的 nvm-windows 版本，并同步 Unix 端 nvm-sh 的回退 tag。
+- 检测到新版本时，Actions 只修改源文件并创建或更新 `automation/sync-installer-versions` PR；没有变化时不会产生空 PR。
+- `nvm-windows 2.x` 当前只有安装器或其他资产，不符合现有免安装流程，因此会被自动跳过，直到上游提供兼容资产。
+- PR 需要先通过现有安装器检查，再由维护者审核合并；仓库需允许 Actions 的 `GITHUB_TOKEN` 写入内容、Pull Request 和 Actions 运行权限。
+
 ## 常用参数
 
 ```bash

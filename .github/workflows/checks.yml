@@ -19,6 +19,7 @@ jobs:
           if command -v dash >/dev/null; then dash -n install.sh; fi
           if command -v zsh >/dev/null; then zsh -n install.zsh; fi
           bash -n scripts/install-unix.sh
+          node --check tools/update-versions.mjs
           bash tests/unix-regression.sh
       - name: Site build and Worker routing
         run: |
