@@ -190,7 +190,8 @@ function Get-PresetConda([string]$Preset) {
     default { 'https://mirrors.tuna.tsinghua.edu.cn/anaconda' }
   }
 }
-$NodeMirrorCn = 'https://npmmirror.com/mirrors/node/'
+$NodeMirrorCn = 'https://cdn.npmmirror.com/binaries/node/'
+$NodeMirrorOfficial = 'https://nodejs.org/dist/'
 $NpmMirrorCn = 'https://npmmirror.com/mirrors/npm/'
 # pyenv-win 的 pyenv update 需要解析 python.org 风格的 HTML 目录，npmmirror 返回 JSON，因此用华为云。
 $PythonMirrorCn = 'https://mirrors.huaweicloud.com/python'
@@ -273,6 +274,92 @@ function Set-NvmSetting([string]$NvmHome, [string]$Key, [string]$Value) {
   if ($Value) { $lines += "${Key}: $Value" }
   Write-Utf8File $settings (($lines -join "`r`n") + "`r`n")
 }
+function Get-NvmNodeMirror([string]$NvmExe) {
+  $settings = Join-Path (Split-Path -Parent $NvmExe) 'settings.txt'
+  if (Test-Path -LiteralPath $settings) {
+    foreach ($line in Get-Content -LiteralPath $settings) {
+      if ($line -match '^node_mirror:\s*(.+)$') { return $Matches[1].Trim() }
+    }
+  }
+  return ''
+}
+function Test-NodeAssetUrl([string]$Url) {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri $Url -TimeoutSec 10 -ErrorAction Stop
+    return ([int]$response.StatusCode -ge 200 -and [int]$response.StatusCode -lt 400)
+  } catch {
+    return $false
+  }
+}
+function Get-NodeLtsVersionFromCatalog([object[]]$Catalog, [string]$Mirror) {
+  $platform = switch ($Arch) {
+    'arm64' { 'win-arm64' }
+    'x86' { 'win-x86' }
+    default { 'win-x64' }
+  }
+  $base = $Mirror.TrimEnd('/') + '/'
+  $releases = @(
+    foreach ($release in $Catalog) {
+      $raw = [string]$release.version
+      $version = $raw.TrimStart('v')
+      if ($version -notmatch '^\d+\.\d+\.\d+$' -or -not $release.lts) { continue }
+      if (@($release.files) -notcontains "$platform-zip") { continue }
+      [pscustomobject]@{
+        Version = $version
+        Url = ($base + "v$version/node-v$version-$platform.zip")
+      }
+    }
+  ) | Sort-Object { [version]$_.Version } -Descending
+  foreach ($release in $releases) {
+    if (Test-NodeAssetUrl $release.Url) { return $release }
+  }
+  return $null
+}
+function Resolve-NodeLtsVersion([string]$NvmExe, [bool]$Cn) {
+  $mirrors = @()
+  if ($Cn) { $mirrors += $NodeMirrorCn }
+  $configured = Get-NvmNodeMirror $NvmExe
+  if ($configured) { $mirrors += $configured }
+  $mirrors += $NodeMirrorOfficial
+  $mirrors = @($mirrors | ForEach-Object { $_.TrimEnd('/') + '/' } | Select-Object -Unique)
+  foreach ($mirror in $mirrors) {
+    try {
+      $catalog = Invoke-RestMethod -Uri ($mirror + 'index.json') -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+    } catch {
+      Write-Warn "Node.js 版本列表不可用: $mirror"
+      continue
+    }
+    $candidate = Get-NodeLtsVersionFromCatalog $catalog $mirror
+    if ($candidate) {
+      return [pscustomobject]@{ Version = $candidate.Version; Mirror = $mirror }
+    }
+    Write-Warn "Node.js LTS 索引中的 Windows 安装包尚未同步: $mirror"
+  }
+  return $null
+}
+function Set-NvmNodeMirror([string]$NvmExe, [string]$Mirror) {
+  $nvmHome = Split-Path -Parent $NvmExe
+  $version = [string](@(& $NvmExe version 2>$null) | Select-Object -First 1)
+  if ($version -match '^\s*v?2\.') {
+    Invoke-NodeCommand $NvmExe @('config','set',"node_mirror=$($Mirror.TrimEnd('/'))")
+  } else {
+    Set-NvmSetting $nvmHome 'node_mirror' $Mirror
+  }
+}
+function Resolve-NodeInstallTarget([string]$NvmExe, [bool]$Cn) {
+  $candidate = Resolve-NodeLtsVersion $NvmExe $Cn
+  if ($candidate) {
+    $activeMirror = Get-NvmNodeMirror $NvmExe
+    if (-not $activeMirror -or $activeMirror.TrimEnd('/') -ne $candidate.Mirror.TrimEnd('/')) {
+      try { Set-NvmNodeMirror $NvmExe $candidate.Mirror }
+      catch { throw "无法配置 Node.js 下载镜像 $($candidate.Mirror): $_" }
+    }
+    Write-Inst "选择 Node.js LTS $($candidate.Version)"
+    return $candidate.Version
+  }
+  Write-Warn '无法预先验证 Node.js LTS 安装包，将交给 nvm 直接解析 lts'
+  return 'lts'
+}
 function Install-Node {
   Write-Step 'Node.js: nvm-windows / Node.js LTS / npm / pnpm'
   $cn = ((Get-InstRegion) -eq 'cn')
@@ -319,13 +406,15 @@ function Install-Node {
   Add-UserPath $nvmHome -Force
   Add-UserPath $symlink -Force
   if ($cn -and -not $NpmRegistry) { $script:NpmRegistry = Get-PresetNpm 'npmmirror' }
-  Invoke-Native $nvmExe @('install','lts')
+  $nodeTarget = 'lts'
+  if (-not $DryRun) { $nodeTarget = Resolve-NodeInstallTarget $nvmExe $cn }
+  Invoke-Native $nvmExe @('install',$nodeTarget)
   Write-Inst 'nvm use 需要创建符号链接，可能弹出 UAC 授权窗口'
-  Invoke-Native $nvmExe @('use','lts')
+  Invoke-Native $nvmExe @('use',$nodeTarget)
   if ($DryRun) { Invoke-NpmGlobal @('pnpm'); return }
   $env:Path = "$symlink;$env:Path"
   $nodeExe = Join-Path $symlink 'node.exe'
-  if (-not (Test-Path -LiteralPath $nodeExe)) { throw 'nvm use 未生成可用的 Node.js；请在管理员终端运行 nvm use lts，或开启 Windows「开发者模式」后重试。' }
+  if (-not (Test-Path -LiteralPath $nodeExe)) { throw "nvm use $nodeTarget 未生成可用的 Node.js；请在管理员终端运行 nvm use $nodeTarget，或开启 Windows「开发者模式」后重试。" }
   Invoke-NpmGlobal @('pnpm')
   Write-Ok ("node {0}  npm {1}  pnpm {2}" -f (& $nodeExe --version), (& (Join-Path $symlink 'npm.cmd') --version), (& (Join-Path $symlink 'pnpm.cmd') --version 2>$null))
 }
@@ -765,8 +854,9 @@ function Update-All {
   Write-Step '更新已安装工具'
   $nvmExe = Find-Nvm
   if ($nvmExe) {
-    Invoke-Native $nvmExe @('install','lts')
-    Invoke-Native $nvmExe @('use','lts')
+    $nodeTarget = if ($DryRun) { 'lts' } else { Resolve-NodeInstallTarget $nvmExe ((Get-InstRegion) -eq 'cn') }
+    Invoke-Native $nvmExe @('install',$nodeTarget)
+    Invoke-Native $nvmExe @('use',$nodeTarget)
     Refresh-ProcessEnvironment
     Invoke-NpmGlobal @('pnpm@latest')
   }
