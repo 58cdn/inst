@@ -6,7 +6,7 @@
   "name": "inst",
   "main": "worker/index.mjs",
   "compatibility_date": "2026-09-15",
-  "build": { "command": "node tools/build-site.mjs", "watch_dir": ["site", "scripts", "worker"] },
+  "build": { "command": "node tools/build-site.mjs", "watch_dir": ["site", "scripts", "worker", "mirrors.json"] },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

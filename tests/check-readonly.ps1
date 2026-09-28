@@ -13,6 +13,9 @@ foreach ($file in @('install.ps1', 'scripts\install-windows.ps1')) {
 if ([IO.File]::ReadAllBytes((Join-Path $root 'install.ps1')) | Where-Object { $_ -gt 127 }) { throw 'install.ps1 contains non-ASCII bytes' }
 $bytes = [IO.File]::ReadAllBytes((Join-Path $root 'scripts\install-windows.ps1'))
 if ($bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) { throw 'install-windows.ps1 must be saved as UTF-8 with BOM for Windows PowerShell 5.1' }
+$cmdText = [IO.File]::ReadAllText((Join-Path $root 'install.cmd'))
+if ($cmdText -match 'if not defined INST_RAW_BASE_URL set') { throw 'install.cmd must not turn the default URL into an explicit override' }
+if ($cmdText -notmatch 'INST_BOOTSTRAP_BASE') { throw 'install.cmd must use a separate bootstrap URL variable' }
 
 $env:INST_NO_UPDATE_CHECK = '1'
 $env:INST_NO_TTY = '1'

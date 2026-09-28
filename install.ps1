@@ -6,6 +6,66 @@
 $instBootstrapArgs = @($args)
 # Empty under `irm | iex` and scriptblock invocation; set only when run as a file.
 $instBootstrapSelf = $MyInvocation.MyCommand.Path
+
+function Test-InstHttpsUrl([string]$Value) {
+  $uri = $null
+  return [Uri]::TryCreate($Value, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -eq 'https' -and [bool]$uri.Host
+}
+function Get-InstMirrorUrls([object]$Manifest, [string]$Fallback) {
+  $entries = @()
+  if ($Manifest -is [Array]) { $entries = @($Manifest) }
+  elseif ($Manifest -and $Manifest.mirrors) { $entries = @($Manifest.mirrors) }
+  $urls = @(); $seen = @{}
+  foreach ($entry in $entries) {
+    $url = if ($entry -is [string]) { [string]$entry } else { [string]$entry.url }
+    if (-not $url) { continue }
+    $url = $url.Trim().TrimEnd('/')
+    if (-not (Test-InstHttpsUrl $url) -or $seen.ContainsKey($url)) { continue }
+    $seen[$url] = $true
+    $urls += $url
+  }
+  $fallback = $Fallback.TrimEnd('/')
+  if (Test-InstHttpsUrl $fallback -and -not $seen.ContainsKey($fallback)) { $urls += $fallback }
+  return $urls
+}
+function Test-InstMirror([string]$Base, [int]$TimeoutSec) {
+  $watch = [Diagnostics.Stopwatch]::StartNew()
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Method Get -Uri ($Base.TrimEnd('/') + '/VERSION') -TimeoutSec $TimeoutSec -ErrorAction Stop
+    $watch.Stop()
+    $status = [int]$response.StatusCode
+    if ($status -ge 200 -and $status -lt 400) {
+      return [pscustomobject]@{ Url = $Base.TrimEnd('/'); LatencyMs = [math]::Round($watch.Elapsed.TotalMilliseconds, 3) }
+    }
+  } catch { }
+  if ($watch.IsRunning) { $watch.Stop() }
+  return $null
+}
+function Resolve-InstBaseUrl([string]$Fallback) {
+  if ($env:INST_MIRROR_AUTO -eq '0') { return $Fallback }
+  $timeout = 5; $parsed = 0
+  if ([int]::TryParse([string]$env:INST_MIRROR_TIMEOUT, [ref]$parsed) -and $parsed -gt 0 -and $parsed -le 60) { $timeout = $parsed }
+  try {
+    $manifest = Invoke-RestMethod -UseBasicParsing -Uri ($Fallback.TrimEnd('/') + '/mirrors.json') -TimeoutSec $timeout -ErrorAction Stop
+  } catch {
+    Write-Host "[inst] mirror list unavailable; using default $Fallback"
+    return $Fallback
+  }
+  $results = @(
+    foreach ($url in (Get-InstMirrorUrls $manifest $Fallback)) {
+      $result = Test-InstMirror $url $timeout
+      if ($result) { $result }
+    }
+  )
+  if ($results.Count) {
+    $best = $results | Sort-Object LatencyMs | Select-Object -First 1
+    Write-Host "[inst] selected mirror $($best.Url) (latency $($best.LatencyMs)ms)"
+    return $best.Url
+  }
+  Write-Host "[inst] no reachable mirror; using default $Fallback"
+  return $Fallback
+}
+if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
 & {
   param([object[]]$Forward, [string]$Self)
   $ErrorActionPreference = 'Stop'
@@ -27,11 +87,21 @@ $instBootstrapSelf = $MyInvocation.MyCommand.Path
       $target = $local
     } else {
       $base = $env:INST_RAW_BASE_URL
+      $explicitBase = [bool]$base
       if (-not $base) { $base = 'https://inst.linux.yun' }
-      if (-not $base.StartsWith('https://')) { throw 'INST_RAW_BASE_URL must use HTTPS' }
+      if (-not (Test-InstHttpsUrl $base)) { throw 'INST_RAW_BASE_URL must use HTTPS' }
+      if (-not $explicitBase) { $base = Resolve-InstBaseUrl $base }
       $env:INST_RAW_BASE_URL = $base
       $env:INST_RUN_MODE = 'remote'
-      $bytes = (New-Object Net.WebClient).DownloadData("$base/scripts/install-windows.ps1")
+      try {
+        $bytes = (New-Object Net.WebClient).DownloadData("$base/scripts/install-windows.ps1")
+      } catch {
+        if ($explicitBase -or $base -eq 'https://inst.linux.yun') { throw }
+        Write-Host '[inst] selected mirror download failed; retrying default https://inst.linux.yun'
+        $base = 'https://inst.linux.yun'
+        $env:INST_RAW_BASE_URL = $base
+        $bytes = (New-Object Net.WebClient).DownloadData("$base/scripts/install-windows.ps1")
+      }
       $code = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
       $tokens = $null; $errors = $null
       [Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$errors) | Out-Null

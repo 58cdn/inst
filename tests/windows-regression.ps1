@@ -16,6 +16,41 @@ function Assert-True([bool]$Condition, [string]$Message, $Result) {
   if (-not $Condition) { throw "$Message`n$($Result.Text)" }
 }
 
+# Bootstrap mirror selection is tested without starting the installer child process.
+$env:INST_BOOTSTRAP_LIB_ONLY = '1'
+. (Join-Path $root 'install.ps1')
+Remove-Item Env:INST_BOOTSTRAP_LIB_ONLY -ErrorAction SilentlyContinue
+function Invoke-RestMethod {
+  [CmdletBinding()] param([string]$Uri, [switch]$UseBasicParsing, [int]$TimeoutSec)
+  if ($env:TEST_MIRROR_MANIFEST_FAIL -eq '1') { throw 'simulated manifest failure' }
+  return [pscustomobject]@{ mirrors = @(
+    [pscustomobject]@{ url = 'https://mirror.slow.invalid' },
+    [pscustomobject]@{ url = 'https://mirror.fast.invalid' },
+    [pscustomobject]@{ url = 'https://inst.linux.yun' }
+  ) }
+}
+function Test-InstMirror([string]$Base, [int]$TimeoutSec) {
+  if ($env:TEST_MIRROR_ALL_FAIL -eq '1') { return $null }
+  switch ($Base) {
+    'https://mirror.slow.invalid' { return [pscustomobject]@{ Url = $Base; LatencyMs = 250 } }
+    'https://mirror.fast.invalid' { return [pscustomobject]@{ Url = $Base; LatencyMs = 25 } }
+    default { return [pscustomobject]@{ Url = $Base; LatencyMs = 100 } }
+  }
+}
+$selection = Resolve-InstBaseUrl 'https://inst.linux.yun'
+if ($selection -ne 'https://mirror.fast.invalid') { throw "PowerShell fast mirror selection failed: $selection" }
+$env:TEST_MIRROR_ALL_FAIL = '1'
+$selection = Resolve-InstBaseUrl 'https://inst.linux.yun'
+if ($selection -ne 'https://inst.linux.yun') { throw "PowerShell all-mirror fallback failed: $selection" }
+$env:TEST_MIRROR_MANIFEST_FAIL = '1'; Remove-Item Env:TEST_MIRROR_ALL_FAIL -ErrorAction SilentlyContinue
+$selection = Resolve-InstBaseUrl 'https://inst.linux.yun'
+if ($selection -ne 'https://inst.linux.yun') { throw "PowerShell manifest fallback failed: $selection" }
+$env:INST_MIRROR_AUTO = '0'; Remove-Item Env:TEST_MIRROR_MANIFEST_FAIL -ErrorAction SilentlyContinue
+$selection = Resolve-InstBaseUrl 'https://inst.linux.yun'
+if ($selection -ne 'https://inst.linux.yun') { throw "PowerShell explicit auto-disable failed: $selection" }
+foreach ($name in @('INST_MIRROR_AUTO','TEST_MIRROR_MANIFEST_FAIL')) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue }
+'PASS: PowerShell bootstrap mirror selection and fallbacks'
+
 # Version, usage and argument validation
 $r = Invoke-Inst -Version
 $expected = (Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()

@@ -35,8 +35,17 @@ curl -fsSL https://raw.githubusercontent.com/58cdn/inst/master/install.sh | INST
 $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; irm "$env:INST_RAW_BASE_URL/install.ps1" | iex
 ```
 
-## 菜单
+## 安装入口镜像自动选择
 
+未设置 `INST_RAW_BASE_URL` 时，Unix 与 Windows 的远程 bootstrap 会在正式下载平台安装器前读取官网的 `mirrors.json`。安装器对清单中的每个 HTTPS 节点请求 `/VERSION`，使用本机观测到的请求耗时排序，选择可连通且延迟最低的节点；清单中的官方地址会自动作为最终回退地址。镜像探测使用有限超时，不会阻塞现有安装流程。
+
+- `INST_RAW_BASE_URL=https://...`：显式指定地址并跳过自动选择，适合自建分发站或临时排障。
+- `INST_MIRROR_AUTO=0`：关闭自动镜像探测，直接使用默认官网地址。
+- `INST_MIRROR_TIMEOUT=5`：单个清单请求与节点探测的超时时间（秒，默认 5，允许 1-60）。
+- 清单获取失败、节点探测超时、节点返回错误或全部节点不可用时，继续使用 `https://inst.linux.yun`；只有后续实际下载也失败时才按原流程报错。
+- `mirrors.json` 是官网发布的节点清单，新增节点必须提供与站点相同的静态路径（至少包含 `VERSION`、`scripts/` 和入口脚本）。
+
+## 菜单
 ```
  1  Node.js 环境     nvm / Node.js LTS / npm / pnpm
  2  Python 环境      pyenv / Python / Miniconda
@@ -189,6 +198,7 @@ inst -All -DryRun
 - `scripts/install-unix.sh`：Unix 实现（兼容 bash 3.2）
 - `scripts/install-windows.ps1`：Windows 实现（UTF-8 BOM，兼容 PowerShell 5.1）
 - `site/`：说明页 `index.html` 与响应头 `_headers`
+- `mirrors.json`：远程 bootstrap 探测的官网镜像节点清单
 - `worker/index.mjs`：根路径 User-Agent 分流
 - `tools/build-site.mjs`：生成 `dist/`，并检查换行符（`.sh` 必须是 LF，`.cmd` 必须是 CRLF）
 - `wrangler.jsonc`：Cloudflare Workers 配置（静态资源目录、自定义域名）
