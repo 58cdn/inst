@@ -79,3 +79,5 @@ try {
   Remove-Item -LiteralPath $home2 -Recurse -Force -ErrorAction SilentlyContinue
 }
 'PASS: endpoint configuration merges existing files'
+# The last installer run failed on purpose; don't pass its exit code on (CI exits with $LASTEXITCODE).
+exit 0

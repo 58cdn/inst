@@ -54,3 +54,5 @@ try {
   Remove-Item -LiteralPath $fakeBin -Recurse -Force -ErrorAction SilentlyContinue
 }
 'PASS: numeric version selection, prerelease rejection, HTTPS validation, native command failure and the standalone Node.js conflict'
+# The native failure test left $LASTEXITCODE at 17; report success to the caller.
+exit 0
