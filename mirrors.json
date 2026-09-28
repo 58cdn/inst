@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "mirrors": [
+    { "url": "https://inst.linux.yun", "name": "official" },
+    { "url": "https://raw.githubusercontent.com/58cdn/inst/master", "name": "github" }
+  ]
+}

@@ -1,7 +1,12 @@
 // Root User-Agent routing of worker/index.mjs against a stub ASSETS binding.
 //   node tests/worker.test.mjs
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import worker, { entryFor } from '../worker/index.mjs';
+
+const publishedMirrors = JSON.parse(readFileSync(new URL('../dist/mirrors.json', import.meta.url), 'utf8'));
+assert.ok(Array.isArray(publishedMirrors.mirrors) && publishedMirrors.mirrors.length, 'published mirror manifest');
+assert.ok(publishedMirrors.mirrors.every((mirror) => /^https:\/\//.test(mirror.url)), 'published mirror URLs must use HTTPS');
 
 const env = {
   ASSETS: {
