@@ -1,0 +1,23 @@
+// https://inst.linux.yun: Cloudflare Worker + static assets. CI deploys it after
+// all checks pass (.github/workflows/checks.yml). Locally:
+//   npx wrangler@4 dev       # http://localhost:8787
+//   npx wrangler@4 deploy    # after `wrangler login`, or with CLOUDFLARE_API_TOKEN
+{
+  "name": "inst",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-09-15",
+  "build": { "command": "node tools/build-site.mjs", "watch_dir": ["site", "scripts", "worker"] },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // Only "/" runs the Worker (User-Agent routing). Every other file is a plain
+    // static asset: free, unlimited, and still served if the Worker quota runs out.
+    "run_worker_first": ["/"]
+  },
+  // Custom domain: Cloudflare creates the DNS record and certificate on deploy.
+  "routes": [{ "pattern": "inst.linux.yun", "custom_domain": true }],
+  // Serve on the custom domain only. workers.dev would also need the account to have
+  // registered a workers.dev subdomain, which `wrangler deploy` cannot do in CI.
+  "workers_dev": false,
+  "preview_urls": false
+}

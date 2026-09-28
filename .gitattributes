@@ -1,0 +1,6 @@
+# Normalise to LF everywhere: `curl | sh` breaks on CRLF shell scripts, and core.autocrlf
+# would otherwise check them out with CRLF on Windows.
+* text=auto eol=lf
+# cmd.exe mis-parses LF-only batch files. Stored as-is (CRLF) so a checkout and
+# raw.githubusercontent.com serve the same bytes as the site.
+*.cmd -text

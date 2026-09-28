@@ -1,0 +1,13 @@
+# Response headers for the static assets on Cloudflare Workers (not served itself).
+# Scripts go out as UTF-8 text so browsers display them instead of downloading,
+# and PowerShell `irm` decodes them without guessing.
+/*
+  X-Content-Type-Options: nosniff
+/install.*
+  Content-Type: text/plain; charset=utf-8
+/scripts/*
+  Content-Type: text/plain; charset=utf-8
+/VERSION
+  Content-Type: text/plain; charset=utf-8
+/README.md
+  Content-Type: text/plain; charset=utf-8

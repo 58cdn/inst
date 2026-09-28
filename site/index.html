@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>inst · 跨平台开发环境 & AI Agents 安装器</title>
+<style>
+body{font:16px/1.6 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;max-width:880px;margin:3rem auto;padding:0 1rem;color:#17202a}
+h1{font-size:3rem;margin-bottom:0}pre{padding:1rem;background:#111;color:#d6f5d6;border-radius:8px;overflow:auto}
+code{background:#eef2f5;padding:0 .3em;border-radius:4px}pre code{background:none;padding:0}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #dde3e8;padding:.4rem;text-align:left;vertical-align:top}a{color:#075985}
+</style>
+</head>
+<body>
+<h1>inst</h1>
+<p>一条命令完成 Node.js、Python、镜像源、AI Agents CLI 与桌面端的安装。自动识别 Windows（PowerShell / cmd / Git Bash）、macOS 与 Linux（sh / bash / zsh），中国网络自动启用国内镜像。</p>
+
+<h2>macOS / Linux / WSL / Git Bash</h2>
+<pre><code>curl -fsSL https://inst.linux.yun | sh</code></pre>
+<h2>Windows PowerShell</h2>
+<pre><code>irm https://inst.linux.yun | iex</code></pre>
+<h2>Windows cmd</h2>
+<pre><code>curl -fsSL https://inst.linux.yun/install.cmd -o %TEMP%\inst.cmd &amp;&amp; %TEMP%\inst.cmd</code></pre>
+<p>根地址按 User-Agent 返回入口脚本，也可以使用完整路径：<a href="/install.sh">/install.sh</a>、<a href="/install.ps1">/install.ps1</a>、<a href="/install.cmd">/install.cmd</a>。</p>
+
+<h2>功能</h2>
+<table>
+<tr><th>1 Node.js</th><td>nvm / nvm-windows、Node.js LTS、npm、pnpm</td></tr>
+<tr><th>2 Python</th><td>pyenv / pyenv-win、Python 最新稳定版、Miniconda</td></tr>
+<tr><th>3 镜像</th><td>系统源（apt / dnf / apk / pacman / Homebrew）、npm、pip、conda；清华、阿里云、中科大、腾讯云、华为云</td></tr>
+<tr><th>4 Agents CLI</th><td>Claude Code、Codex、Gemini CLI、OpenCode、Grok Build、OpenClaw、Hermes、Pi（官方脚本或 npm）</td></tr>
+<tr><th>5 桌面端</th><td>Claude Desktop、Codex（ChatGPT 桌面端），可指定安装目录</td></tr>
+<tr><th>6 地址配置</th><td>一键写入各 Agent 的 API Base URL、模型与密钥</td></tr>
+<tr><th>00 更新</th><td>版本检查、校验后替换并备份，支持每日自动更新</td></tr>
+</table>
+
+<p>带参数运行：<code>curl -fsSL https://inst.linux.yun | sh -s -- --all --dry-run</code>。完整说明见 <a href="https://github.com/58cdn/inst#readme">GitHub</a>。</p>
+</body>
+</html>

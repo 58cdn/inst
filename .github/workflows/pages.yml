@@ -1,0 +1,33 @@
+# Alternative host: GitHub Pages, deployed by hand (Actions → Deploy GitHub Pages → Run workflow).
+# The primary site is Cloudflare Workers (wrangler.jsonc, deployed by checks.yml).
+# Setup: Settings → Pages → Source: "GitHub Actions", and set the custom domain on that page
+# (a CNAME file is ignored for Actions deployments). On Cloudflare the record must be DNS only.
+# Pages cannot route "/" by User-Agent, so only the full-path commands work there:
+#   curl -fsSL https://<domain>/install.sh | sh
+#   irm https://<domain>/install.ps1 | iex
+name: Deploy GitHub Pages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - name: Build site
+        run: node tools/build-site.mjs
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v5
