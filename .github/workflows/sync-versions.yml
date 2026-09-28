@@ -1,0 +1,53 @@
+name: Sync installer dependency versions
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-installer-versions
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Check and sync upstream release versions
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/update-versions.mjs
+
+      - name: Create or update dependency PR
+        if: steps.sync.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/sync-installer-versions
+          delete-branch: true
+          commit-message: "chore: sync installer dependency versions"
+          title: "chore: sync installer dependency versions"
+          body: |
+            This automated PR synchronizes pinned installer fallbacks with stable upstream GitHub releases.
+
+            The version sync is limited to releases that provide the `nvm-noinstall.zip` asset used by the Windows installer, plus the Unix `nvm-sh` fallback tag. The workflow excludes drafts, prereleases, and incompatible Windows installer-only releases.
+
+      - name: Run installer checks for generated branch
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run checks.yml --ref automation/sync-installer-versions
