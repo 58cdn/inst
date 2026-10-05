@@ -287,14 +287,14 @@ install_node(){
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   [[ -n "$NODE_MIRROR" ]] && export NVM_NODEJS_ORG_MIRROR="$NODE_MIRROR"
   if ((DRY_RUN)); then
-    [[ -s "$NVM_DIR/nvm.sh" ]] || printf '+ download and execute %q\n' "$(gh_url "https://raw.githubusercontent.com/nvm-sh/nvm/$(github_latest_tag nvm-sh/nvm v0.40.3)/install.sh")"
+    [[ -s "$NVM_DIR/nvm.sh" ]] || printf '+ download and execute %q\n' "$(gh_url "https://raw.githubusercontent.com/nvm-sh/nvm/$(github_latest_tag nvm-sh/nvm v0.40.8)/install.sh")"
     run nvm install --lts; run nvm alias default 'lts/*'; run nvm use default; run npm install --global pnpm
     env_block nvm 'nvm.sh'
     return 0
   fi
   if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
     need curl; need git
-    local tag; tag="$(github_latest_tag nvm-sh/nvm v0.40.3)"
+    local tag; tag="$(github_latest_tag nvm-sh/nvm v0.40.8)"
     log "安装 nvm $tag 到 $NVM_DIR"
     PROFILE=/dev/null NVM_SOURCE="$(gh_url https://github.com/nvm-sh/nvm.git)" \
       official_script "$(gh_url "https://raw.githubusercontent.com/nvm-sh/nvm/$tag/install.sh")"
