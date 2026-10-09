@@ -1,7 +1,9 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '../scripts/lib/download.ps1')
 Add-Type -AssemblyName System.Net.Http
-Add-Type -ReferencedAssemblies System.Net.Http -TypeDefinition @'
+$compile = @{}
+if ($PSVersionTable.PSVersion.Major -le 5) { $compile.ReferencedAssemblies = 'System.Net.Http' }
+Add-Type @compile -TypeDefinition @'
 using System;
 using System.IO;
 using System.Net;
@@ -71,6 +73,22 @@ try {
     if ($mode -eq 'slow' -and $watch.Elapsed.TotalSeconds -lt 3) { throw 'slow download was not exercised' }
     Write-Host "PASS: $mode"
   }
+  # Stop a running PowerShell pipeline (Ctrl+C equivalent) and verify finally cleanup.
+  [InstTestHandler]::Mode = 'no-data'
+  $runner = [PowerShell]::Create()
+  $source = Join-Path $PSScriptRoot '../scripts/lib/download.ps1'
+  $null = $runner.AddScript({ param($Source,$Target)
+    . $Source
+    function New-InstDownloadClient { return New-Object Net.Http.HttpClient((New-Object InstTestHandler)) }
+    Save-InstDownloadAttempt 'https://example.org/a.sh' $Target '' 30 120
+  }).AddArgument($source).AddArgument($out)
+  $async = $runner.BeginInvoke()
+  Start-Sleep -Milliseconds 500
+  $runner.Stop()
+  try { $runner.EndInvoke($async) } catch { }
+  $runner.Dispose()
+  if (@(Get-ChildItem $dir -Filter '*.part.*').Count) { throw 'cancelled pipeline leaked temporary file' }
+  Write-Host 'PASS: cancellation cleanup'
   foreach ($url in @('https://example.org/a.sh','https://inst.linux.yun/scripts/install-unix.sh?token=secret','https://u:p@inst.linux.yun/scripts/install-unix.sh')) {
     if (@(Get-InstDownloadCandidates $url).Count -ne 1) { throw 'unsafe mirror mapping' }
   }

@@ -255,11 +255,11 @@ node tools/build-site.mjs && node tests/worker.test.mjs
 - **下载中无进度**：开始后连续约 120 秒没有新文件数据则失败；Unix 以一秒采样观察文件增长，Windows 每次异步读取独立计时。
 - **整体时限**：大文件没有总时限，持续下载可超过 30 秒。Ctrl+C/终止会取消请求并清理部分文件。CMD 最外层只获取一个很小的 PowerShell 引导脚本，使用系统 curl.exe 并设 30 秒整体上限；不影响后续大文件。
 
-每个候选只尝试一次，自动映射最多两个源：本项目官网与 `58cdn/inst` GitHub master 的相同入口路径；Miniconda 官方目录与清华 TUNA 的相同文件名。已有节点测速选择继续保留；清单中其他选中节点失败后最多再进入这两个内置源。显式自定义 URL、代理、含查询参数的 URL 不会自动改写；URL 内凭据被拒绝。错误记录保留候选序号和失败原因。
+每个候选只尝试一次，自动映射最多两个源：本项目官网与 `58cdn/inst` GitHub master 的相同入口路径；Miniconda 官方目录与清华 TUNA 的相同文件名。已有节点测速选择继续保留；清单中其他选中节点失败后最多再进入这两个内置源。`INST_RAW_BASE_URL` 显式覆盖及 `INST_MIRROR_AUTO=0` 保留入口单源行为；自定义 URL、代理、含查询参数的 URL 不会自动改写；URL 内凭据被拒绝。错误记录保留候选序号和失败原因。
 
 Miniconda 安装前从[Anaconda 官方目录](https://repo.anaconda.com/miniconda/)取得对应架构文件的 SHA256，两站必须匹配同一摘要（包括 `latest`），镜像未同步则失败后切换。无法取得官方摘要时停止安装，不降低校验要求。清华镜像的覆盖及维护方见 [TUNA 官方说明](https://mirrors.tuna.tsinghua.edu.cn/help/anaconda/)。不添加通用 GitHub 代理，不向其他站点发送自定义地址或凭据。下载成功并校验后才替换目标文件；失败保留已有目标，删除此次临时文件。系统安装器原有签名检查继续由系统执行。
 
-范围说明：nvm、pyenv、npm/pip、包管理器以及第三方官方安装脚本内部的网络请求由它们自行管理，inst 不接管其超时；版本索引、区域探测等小型元数据仍使用各自的短总超时。本项目入口跟随发布通道，官网与 master 可能存在部署时间差；不将这类入口当成不可变版本资源。
+范围说明：nvm、pyenv、npm/pip、包管理器以及第三方官方安装脚本内部的网络请求由它们自行管理，inst 不接管其超时，也不读取或转发 `NVM_AUTH_HEADER`；版本索引、区域探测等小型元数据仍使用各自的短总超时。本项目入口跟随发布通道，官网与 master 可能存在部署时间差；不将这类入口当成不可变版本资源。
 
 下载实现维护在 `scripts/lib/download.sh`、`scripts/lib/download.ps1`，通过 `node tools/embed-download.mjs` 嵌入各独立入口，避免安装快捷命令后依赖旁侧文件。修改后运行：
 

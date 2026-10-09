@@ -216,3 +216,23 @@ if command -v node > /dev/null 2>&1 || command -v python3 > /dev/null 2>&1; then
   if inst --endpoint claude --base-url http://insecure.example > /dev/null 2>&1; then fail 'insecure endpoint accepted'; fi
   echo 'PASS: endpoint configuration merges existing files'
 fi
+
+# apt key must be complete and recognizable before any key/repository replacement.
+sed -n '/^install_claude_apt(){/,/^}/p' "$root/scripts/install-unix.sh" > "$scratch/apt-function"
+(
+  source "$scratch/apt-function"
+  DRY_RUN=0; CLAUDE_APT_KEY=https://downloads.claude.ai/claude-desktop/key.asc
+  CLAUDE_APT_REPO=https://downloads.claude.ai/claude-desktop/apt/stable
+  log(){ :; }; err(){ :; }
+  as_root(){ printf '%s\n' "$*" >> "$scratch/apt-actions"; cat >/dev/null; }
+  inst_download(){ return 28; }
+  : > "$scratch/apt-actions"
+  if install_claude_apt; then fail 'failed apt key accepted'; fi
+  if grep -q 'install -m\|tee\|apt-get' "$scratch/apt-actions"; then fail 'failed apt key changed system'; fi
+  inst_download(){ printf '<html>error</html>' > "$2"; }
+  if install_claude_apt; then fail 'invalid apt key accepted'; fi
+  inst_download(){ printf '%s\n' '-----BEGIN PGP PUBLIC KEY BLOCK-----' 'fixture' '-----END PGP PUBLIC KEY BLOCK-----' > "$2"; }
+  install_claude_apt
+  grep -q 'install -m 644' "$scratch/apt-actions" || fail 'validated apt key not installed'
+) < /dev/null
+echo 'PASS: apt key staged validation and download failure'

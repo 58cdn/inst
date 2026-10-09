@@ -4,6 +4,7 @@ import http.server
 import os
 from pathlib import Path
 import signal
+import socket
 import ssl
 import subprocess
 import tempfile
@@ -22,6 +23,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if mode == 'headers':
                 time.sleep(4)
+            if mode == 'redirect-ok':
+                self.send_response(302); self.send_header('Location', '/ok.sh'); self.end_headers(); return
             if mode.startswith('redirect'):
                 n = int(mode[8:])
                 time.sleep(.65)
@@ -73,7 +76,7 @@ with tempfile.TemporaryDirectory() as temp:
     env = dict(os.environ, CURL_CA_BUNDLE=str(d/'cert'), NO_PROXY='localhost')
     def command(mode, digest=''):
         return ['bash','-c','. "$1"; inst_download_attempt "$2" "$3" "$4" 2 2', 'test', str(ROOT/'scripts/lib/download.sh'),f'https://localhost:{server.server_port}/{mode}.sh',str(d/'out'),digest]
-    for mode, success, digest in [('ok',True,''),('small',True,''),('slow',True,''),('headers',False,''),('no-data',False,''),('tiny',False,''),('stall',False,''),('empty',False,''),('html',False,''),('error',False,''),('redirect0',False,''),('downgrade',False,''),('ok',False,'0'*64),('ok',True,hashlib.sha256(BODY).hexdigest())]:
+    for mode, success, digest in [('ok',True,''),('redirect-ok',True,''),('small',True,''),('slow',True,''),('headers',False,''),('no-data',False,''),('tiny',False,''),('stall',False,''),('empty',False,''),('html',False,''),('error',False,''),('redirect0',False,''),('downgrade',False,''),('ok',False,'0'*64),('ok',True,hashlib.sha256(BODY).hexdigest())]:
         (d/'out').write_bytes(b'original')
         begin = time.monotonic()
         result = subprocess.run(command(mode,digest), env=env, capture_output=True, timeout=12)
@@ -87,6 +90,19 @@ with tempfile.TemporaryDirectory() as temp:
         if mode == 'slow':
             assert elapsed > 4, elapsed
         print('PASS:',mode,round(elapsed,2),flush=True)
+    listener = socket.socket()
+    listener.bind(('127.0.0.1',0)); listener.listen()
+    def no_handshake():
+        conn, _ = listener.accept()
+        with conn: time.sleep(4)
+    threading.Thread(target=no_handshake, daemon=True).start()
+    tls_cmd = command('ok')
+    tls_cmd[5] = f'https://localhost:{listener.getsockname()[1]}/ok.sh'
+    begin = time.monotonic()
+    tls_result = subprocess.run(tls_cmd, env=env, capture_output=True, timeout=4)
+    assert tls_result.returncode != 0 and time.monotonic() - begin < 3.5
+    listener.close()
+    print('PASS: TLS handshake shares start deadline',flush=True)
     p = subprocess.Popen(command('no-data'),env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
     time.sleep(.3); os.killpg(p.pid,signal.SIGTERM); p.communicate(timeout=3)
     assert p.returncode != 0 and not list(d.glob('out.part.*'))
@@ -97,12 +113,15 @@ with tempfile.TemporaryDirectory() as temp:
 subprocess.run(['bash','-c',r'''
 set -eu
 . "$1/scripts/lib/download.sh"
+unset INST_RAW_BASE_URL INST_MIRROR_AUTO || true
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 for url in 'https://example.org/a.zip' 'https://inst.linux.yun/scripts/install-unix.sh?token=secret' 'https://u:p@inst.linux.yun/scripts/install-unix.sh'; do
   [ "$(inst_download_candidates "$url" | wc -l | tr -d ' ')" = 1 ]
 done
 [ "$(inst_download_candidates https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh | wc -l | tr -d ' ')" = 1 ]
 [ "$(inst_download_candidates https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh abc | wc -l | tr -d ' ')" = 2 ]
+[ "$(INST_RAW_BASE_URL=https://inst.linux.yun inst_download_candidates https://inst.linux.yun/install.sh | wc -l | tr -d ' ')" = 1 ]
+[ "$(INST_MIRROR_AUTO=0 inst_download_candidates https://inst.linux.yun/install.sh | wc -l | tr -d ' ')" = 1 ]
 inst_download_attempt() { echo attempt >> "$tmp/log"; case "$1" in https://inst.linux.yun/*) return 28;; *) echo valid > "$2";; esac; }
 inst_download https://inst.linux.yun/scripts/install-unix.sh "$tmp/out"
 [ "$(cat "$tmp/out")" = valid ]; [ "$(wc -l < "$tmp/log" | tr -d ' ')" = 2 ]

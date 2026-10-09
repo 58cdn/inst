@@ -209,6 +209,7 @@ function Test-InstDownloadPrefix([string]$Url, [byte[]]$Bytes, [int]$Count, [str
   if ($path -match '\.(zip|msix)$' -and ($Count -lt 4 -or [BitConverter]::ToString($Bytes,0,4) -ne '50-4B-03-04')) { throw 'invalid ZIP prefix' }
   if ($path -match '\.exe$' -and ($Count -lt 2 -or $Bytes[0] -ne 77 -or $Bytes[1] -ne 90)) { throw 'invalid EXE prefix' }
   if ($path -match '\.sh$' -and -not $text.StartsWith('#!')) { throw 'invalid script prefix' }
+  if ($path -notmatch '\.(zip|msix|exe|sh|ps1|asc)$' -and $Count -lt 512) { throw 'unrecognized short response' }
   if ($path -match '\.ps1$' -and -not $text.TrimStart([char]0xFEFF).StartsWith('#')) { throw 'invalid PowerShell prefix' }
 }
 function Wait-InstDownloadTask($Task, $Cancellation) {
@@ -288,6 +289,7 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
   $official = 'https://inst.linux.yun/'
   $github = 'https://raw.githubusercontent.com/58cdn/inst/master/'
   foreach ($path in @('scripts/install-unix.sh','scripts/install-windows.ps1','install.sh','install.ps1')) {
+    if ($env:INST_RAW_BASE_URL -or $env:INST_MIRROR_AUTO -eq '0') { continue }
     if ($Url -ceq ($official + $path)) { $github + $path }
     if ($Url -ceq ($github + $path)) { $official + $path }
   }
@@ -657,7 +659,7 @@ function Install-Miniconda {
     $installer = Join-Path $Prefix $file
     $digest = ''
     if (-not $DryRun) {
-      $index = (Invoke-WebRequest -UseBasicParsing -Uri 'https://repo.anaconda.com/miniconda/' -TimeoutSec 30 -MaximumRedirection 5).Content
+      $index = (Invoke-WebRequest -UseBasicParsing -Uri 'https://repo.anaconda.com/miniconda/' -TimeoutSec 30 -MaximumRedirection 0).Content
       $row = [regex]::Match($index, '(?s)<tr>\s*<td>\s*<a href="' + [regex]::Escape($file) + '".*?</tr>')
       $digest = [regex]::Match($row.Value, '[0-9a-f]{64}').Value
       if (-not $digest) { throw 'Miniconda official SHA256 unavailable' }

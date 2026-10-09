@@ -40,9 +40,11 @@ jobs:
           ./tests/python-version.ps1
           ./tests/windows-regression.ps1
           ./tests/cgpu.ps1
-      - name: PowerShell 7 parse check
+      - name: PowerShell 7 download and parse checks
         shell: pwsh
-        run: ./tests/check-readonly.ps1
+        run: |
+          ./tests/download-regression.ps1
+          ./tests/check-readonly.ps1
   # https://inst.linux.yun (Cloudflare Workers, see wrangler.jsonc). Runs only after every
   # check passed on the default branch. Needs the repository secrets CLOUDFLARE_API_TOKEN
   # ("Edit Cloudflare Workers" template) and CLOUDFLARE_ACCOUNT_ID; without them it only

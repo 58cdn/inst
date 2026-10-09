@@ -62,7 +62,7 @@ inst_download_prefix() {
   http_status=$(awk '/^HTTP\// { code=$2 } END { print code }' "$3")
   [ "$http_status" = 200 ] || { echo "download: HTTP ${http_status:-missing status}" >&2; return 1; }
   # Reject error pages even when a server incorrectly returns 200/octet-stream.
-  if tail -n 15 "$3" 2>/dev/null | grep -Eiq '^content-type:.*(text/html|application/(json|problem\+json))' \
+  if awk '/^HTTP\// { type="" } tolower($0) ~ /^content-type:/ { type=$0 } END { print type }' "$3" | grep -Eiq '^content-type:.*(text/html|application/(json|problem\+json))' \
     || head -c 512 "$2" | LC_ALL=C grep -Eiq '<(!doctype[[:space:]]+html|html|head|body)([[:space:]>])'; then
     echo 'download: unexpected error document' >&2; return 1
   fi
@@ -71,7 +71,9 @@ inst_download_prefix() {
     *.zip|*.msix) case "$magic" in 504b0304*) ;; *) echo 'download: invalid ZIP prefix' >&2; return 1;; esac;;
     *.exe) case "$magic" in 4d5a*) ;; *) echo 'download: invalid EXE prefix' >&2; return 1;; esac;;
     *.sh) case "$magic" in 2321*) ;; *) echo 'download: invalid script prefix' >&2; return 1;; esac;;
+    *.asc) head -c 512 "$2" | grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----' || { echo 'download: invalid PGP prefix' >&2; return 1; };;
     *.ps1) case "$magic" in 23*|efbbbf23*) ;; *) echo 'download: invalid PowerShell prefix' >&2; return 1;; esac;;
+    *) [ "$(wc -c < "$2" | tr -d ' ')" -ge 512 ] || { echo 'download: unrecognized short response' >&2; return 1; };;
   esac
 }
 inst_download_candidates() {
@@ -79,8 +81,10 @@ inst_download_candidates() {
   # Exact public paths only: never mirror queries, credentials, custom hosts or proxies.
   case "$1" in
     https://inst.linux.yun/scripts/install-unix.sh|https://inst.linux.yun/scripts/install-windows.ps1|https://inst.linux.yun/install.sh|https://inst.linux.yun/install.ps1)
+      [ -z "${INST_RAW_BASE_URL:-}" ] && [ "${INST_MIRROR_AUTO:-1}" != 0 ] || return 0
       printf 'https://raw.githubusercontent.com/58cdn/inst/master/%s\n' "${1#https://inst.linux.yun/}";;
     https://raw.githubusercontent.com/58cdn/inst/master/scripts/install-unix.sh|https://raw.githubusercontent.com/58cdn/inst/master/scripts/install-windows.ps1|https://raw.githubusercontent.com/58cdn/inst/master/install.sh|https://raw.githubusercontent.com/58cdn/inst/master/install.ps1)
+      [ -z "${INST_RAW_BASE_URL:-}" ] && [ "${INST_MIRROR_AUTO:-1}" != 0 ] || return 0
       printf 'https://inst.linux.yun/%s\n' "${1#https://raw.githubusercontent.com/58cdn/inst/master/}";;
   esac
   # Miniconda mutable aliases are only portable with a pinned digest.

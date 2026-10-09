@@ -16,6 +16,7 @@ function Test-InstDownloadPrefix([string]$Url, [byte[]]$Bytes, [int]$Count, [str
   if ($path -match '\.(zip|msix)$' -and ($Count -lt 4 -or [BitConverter]::ToString($Bytes,0,4) -ne '50-4B-03-04')) { throw 'invalid ZIP prefix' }
   if ($path -match '\.exe$' -and ($Count -lt 2 -or $Bytes[0] -ne 77 -or $Bytes[1] -ne 90)) { throw 'invalid EXE prefix' }
   if ($path -match '\.sh$' -and -not $text.StartsWith('#!')) { throw 'invalid script prefix' }
+  if ($path -notmatch '\.(zip|msix|exe|sh|ps1|asc)$' -and $Count -lt 512) { throw 'unrecognized short response' }
   if ($path -match '\.ps1$' -and -not $text.TrimStart([char]0xFEFF).StartsWith('#')) { throw 'invalid PowerShell prefix' }
 }
 function Wait-InstDownloadTask($Task, $Cancellation) {
@@ -95,6 +96,7 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
   $official = 'https://inst.linux.yun/'
   $github = 'https://raw.githubusercontent.com/58cdn/inst/master/'
   foreach ($path in @('scripts/install-unix.sh','scripts/install-windows.ps1','install.sh','install.ps1')) {
+    if ($env:INST_RAW_BASE_URL -or $env:INST_MIRROR_AUTO -eq '0') { continue }
     if ($Url -ceq ($official + $path)) { $github + $path }
     if ($Url -ceq ($github + $path)) { $official + $path }
   }
@@ -223,7 +225,6 @@ if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
       if (-not $base) { $base = 'https://inst.linux.yun' }
       if (-not (Test-InstHttpsUrl $base)) { throw 'INST_RAW_BASE_URL must use HTTPS' }
       if (-not $explicitBase) { $base = Resolve-InstBaseUrl $base }
-      $env:INST_RAW_BASE_URL = $base
       $env:INST_RUN_MODE = 'remote'
       $temp = Join-Path ([IO.Path]::GetTempPath()) ("inst-" + [Guid]::NewGuid().ToString('N') + '.ps1')
       try {
@@ -232,9 +233,9 @@ if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
         if ($explicitBase -or $base -in @('https://inst.linux.yun','https://raw.githubusercontent.com/58cdn/inst/master')) { throw }
         Write-Host '[inst] selected mirror download failed; retrying default https://inst.linux.yun'
         $base = 'https://inst.linux.yun'
-        $env:INST_RAW_BASE_URL = $base
         Save-InstDownload "$base/scripts/install-windows.ps1" $temp
       }
+      $env:INST_RAW_BASE_URL = $base
       $bytes = [IO.File]::ReadAllBytes($temp)
       $code = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
       $tokens = $null; $errors = $null
