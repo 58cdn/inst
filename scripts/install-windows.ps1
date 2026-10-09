@@ -291,7 +291,7 @@ function Test-NodeAssetUrl([string]$Url) {
     return $false
   }
 }
-function Get-NodeLtsVersionFromCatalog([object[]]$Catalog, [string]$Mirror) {
+function Get-NodeLtsCandidatesFromCatalog([object[]]$Catalog, [string]$Mirror) {
   $platform = switch ($Arch) {
     'arm64' { 'win-arm64' }
     'x86' { 'win-x86' }
@@ -310,7 +310,11 @@ function Get-NodeLtsVersionFromCatalog([object[]]$Catalog, [string]$Mirror) {
       }
     }
   ) | Sort-Object { [version]$_.Version } -Descending
-  foreach ($release in $releases) {
+  # Bound retries per mirror; older supported LTS patch versions remain fallback choices.
+  return @($releases | Select-Object -First 4)
+}
+function Get-NodeLtsVersionFromCatalog([object[]]$Catalog, [string]$Mirror) {
+  foreach ($release in @(Get-NodeLtsCandidatesFromCatalog $Catalog $Mirror)) {
     if (Test-NodeAssetUrl $release.Url) { return $release }
   }
   return $null
@@ -360,6 +364,55 @@ function Resolve-NodeInstallTarget([string]$NvmExe, [bool]$Cn) {
   Write-Warn '无法预先验证 Node.js LTS 安装包，将交给 nvm 直接解析 lts'
   return 'lts'
 }
+function Get-NodeInstallCandidates([string]$NvmExe, [bool]$Cn) {
+  $mirrors = @()
+  if ($Cn) { $mirrors += $NodeMirrorCn }
+  $configured = Get-NvmNodeMirror $NvmExe
+  if ($configured) { $mirrors += $configured }
+  $mirrors += $NodeMirrorOfficial
+  foreach ($mirror in @($mirrors | ForEach-Object { $_.TrimEnd('/') + '/' } | Select-Object -Unique)) {
+    try {
+      $catalog = Invoke-RestMethod -Uri ($mirror + 'index.json') -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
+    } catch {
+      Write-Warn "Node.js 版本列表不可用，跳过镜像: $mirror"
+      continue
+    }
+    foreach ($candidate in @(Get-NodeLtsCandidatesFromCatalog $catalog $mirror)) {
+      [pscustomobject]@{ Version = $candidate.Version; Mirror = $mirror }
+    }
+  }
+}
+function Install-NodeLtsWithRecovery([string]$NvmExe, [bool]$Cn) {
+  $candidates = @(Get-NodeInstallCandidates $NvmExe $Cn)
+  if (-not $candidates.Count) {
+    Write-Warn '镜像版本列表均不可用，最后尝试 nvm install lts'
+    Invoke-NodeCommand $NvmExe @('install','lts')
+    return 'lts'
+  }
+  $activeMirror = Get-NvmNodeMirror $NvmExe
+  $failures = @()
+  foreach ($candidate in $candidates) {
+    if (-not $activeMirror -or $activeMirror.TrimEnd('/') -ne $candidate.Mirror.TrimEnd('/')) {
+      try {
+        Set-NvmNodeMirror $NvmExe $candidate.Mirror
+        $activeMirror = $candidate.Mirror
+      } catch {
+        $failures += "$($candidate.Version) @ $($candidate.Mirror): mirror configuration failed"
+        Write-Warn "无法切换 Node.js 镜像 $($candidate.Mirror): $_"
+        continue
+      }
+    }
+    Write-Inst "尝试 Node.js LTS $($candidate.Version) ($($candidate.Mirror))"
+    try {
+      Invoke-NodeCommand $NvmExe @('install',$candidate.Version)
+      return $candidate.Version
+    } catch {
+      $failures += "$($candidate.Version) @ $($candidate.Mirror)"
+      Write-Warn "Node.js $($candidate.Version) 安装失败: $_；自动尝试下一版本/镜像"
+    }
+  }
+  throw "Node.js LTS 所有备选安装均失败：$($failures -join '; ')"
+}
 function Install-Node {
   Write-Step 'Node.js: nvm-windows / Node.js LTS / npm / pnpm'
   $cn = ((Get-InstRegion) -eq 'cn')
@@ -407,8 +460,8 @@ function Install-Node {
   Add-UserPath $symlink -Force
   if ($cn -and -not $NpmRegistry) { $script:NpmRegistry = Get-PresetNpm 'npmmirror' }
   $nodeTarget = 'lts'
-  if (-not $DryRun) { $nodeTarget = Resolve-NodeInstallTarget $nvmExe $cn }
-  Invoke-Native $nvmExe @('install',$nodeTarget)
+  if ($DryRun) { Invoke-Native $nvmExe @('install',$nodeTarget) }
+  else { $nodeTarget = Install-NodeLtsWithRecovery $nvmExe $cn }
   Write-Inst 'nvm use 需要创建符号链接，可能弹出 UAC 授权窗口'
   Invoke-Native $nvmExe @('use',$nodeTarget)
   if ($DryRun) { Invoke-NpmGlobal @('pnpm'); return }
