@@ -274,7 +274,7 @@ function Save-InstDownloadAttempt([string]$Url, [string]$OutFile, [string]$Sha25
     if ($null -ne $response.Content.Headers.ContentLength -and $total -ne $response.Content.Headers.ContentLength) { throw 'incomplete response' }
     $file.Dispose(); $file = $null
     if ($Sha256 -and (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash -ne $Sha256) { throw 'SHA256 mismatch' }
-    if ([IO.File]::Exists($OutFile)) { [IO.File]::Replace($temp, $OutFile, $null) }
+    if ([IO.File]::Exists($OutFile)) { [IO.File]::Replace($temp, $OutFile, [System.Management.Automation.Language.NullString]::Value) }
     else { [IO.File]::Move($temp, $OutFile) }
   } catch [OperationCanceledException] {
     throw 'download start/no-progress deadline exceeded'
