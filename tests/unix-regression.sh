@@ -5,9 +5,10 @@ scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 export HOME="$scratch/home" INST_PREFIX="$scratch/prefix" INST_SHELL_RC="$scratch/profile"
 export INST_REGION=global INST_NO_UPDATE_CHECK=1 INST_NO_TTY=1 NO_COLOR=1
-unset INST_RAW_BASE_URL INST_INSTALLER_PATH INST_MIRROR_PRESET INST_GH_PROXY || true
+unset INST_RAW_BASE_URL INST_SELECTED_BASE_URL INST_INSTALLER_PATH INST_MIRROR_PRESET INST_GH_PROXY || true
 mkdir -p "$HOME" "$scratch/bin"
 export PATH="$scratch/bin:$PATH"
+export TEST_DOWNLOAD_LIB="$root/scripts/lib/download.sh"
 export TEST_OS=Darwin TEST_ARCH=arm64
 cat > "$scratch/bin/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -38,9 +39,11 @@ if [[ "$MIRROR_MODE" == manifest-fail && "$url" == */mirrors.json ]]; then exit 
 if [[ "$url" == */mirrors.json ]]; then
   printf '%s\n' '{"version":1,"mirrors":[{"url":"https://mirror.slow.invalid"},{"url":"https://mirror.fast.invalid"},{"url":"https://inst.linux.yun"}]}' > "$out"
 elif [[ "$url" == https://mirror.slow.invalid/VERSION ]]; then
+  [[ "$MIRROR_MODE" == builtin-fallback ]] && exit 22
   [[ "$MIRROR_MODE" == all-fail ]] && exit 28
   printf '200 0.200000'
 elif [[ "$url" == https://mirror.fast.invalid/VERSION ]]; then
+  [[ "$MIRROR_MODE" == builtin-fallback ]] && exit 22
   [[ "$MIRROR_MODE" == all-fail ]] && exit 28
   [[ "$MIRROR_MODE" == http-error ]] && { printf '500 0.001000'; exit 0; }
   printf '200 0.020000'
@@ -49,8 +52,10 @@ elif [[ "$url" == https://inst.linux.yun/VERSION ]]; then
   printf '200 0.100000'
 elif [[ "$MIRROR_MODE" == download-fail && "$url" == https://mirror.fast.invalid/scripts/install-unix.sh ]]; then
   exit 22
+elif [[ "$MIRROR_MODE" == builtin-fallback && "$url" == https://inst.linux.yun/scripts/install-unix.sh ]]; then
+  exit 22
 elif [[ "$url" == */scripts/install-unix.sh ]]; then
-  printf '#!/usr/bin/env bash\nprintf "selected=%%s\\n" "$INST_RAW_BASE_URL"\n' > "$out"
+  printf '#!/usr/bin/env bash\nprintf "selected=%%s\\n" "${INST_RAW_BASE_URL:-$INST_SELECTED_BASE_URL}"\nprintf "explicit=%%s\\n" "$INST_RAW_BASE_URL"\n. "$TEST_DOWNLOAD_LIB"\nprintf "candidates=%%s\\n" "$(inst_download_candidates "$INST_SELECTED_BASE_URL/scripts/install-unix.sh" | wc -l | tr -d \" \")"\n' > "$out"
 else
   exit 22
 fi
@@ -70,6 +75,11 @@ env INST_RAW_BASE_URL=https://mirror.explicit.invalid MIRROR_MODE=normal PATH="$
 grep -q 'selected=https://mirror.explicit.invalid' "$scratch/mirror-explicit" || fail 'explicit mirror override'
 env -u INST_RAW_BASE_URL INST_MIRROR_AUTO=0 MIRROR_MODE=normal PATH="$scratch/bin:$PATH" bash "$remote/install.sh" --dry-run > "$scratch/mirror-disabled" 2>&1
 grep -q 'selected=https://inst.linux.yun' "$scratch/mirror-disabled" || fail 'mirror auto-disable'
+grep -q '^explicit=$' "$scratch/mirror-fast" || fail 'automatic base became an explicit override'
+env -u INST_RAW_BASE_URL -u INST_MIRROR_AUTO MIRROR_MODE=builtin-fallback PATH="$scratch/bin:$PATH" bash "$remote/install.sh" --dry-run > "$scratch/mirror-actual" 2>&1
+grep -q '^selected=https://raw.githubusercontent.com/58cdn/inst/master$' "$scratch/mirror-actual" || fail 'bootstrap lost actual successful source'
+grep -q '^explicit=$' "$scratch/mirror-actual" || fail 'bootstrap exported automatic source as explicit'
+grep -q '^candidates=2$' "$scratch/mirror-actual" || fail 'remote self-update fallback disabled'
 echo 'PASS: bootstrap mirror selection and fallbacks'
 
 [[ "$(inst --version)" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '--version'
@@ -167,6 +177,7 @@ FAKE_REMOTE=$'#!/bin/bash\nINST_VERSION="9.0.0"\n' PATH="$scratch/curlbin:$PATH"
 grep -q 'INST_VERSION="9.0.0"' "$INST_INSTALLER_PATH" || fail 'self-update did not replace'
 grep -q 'INST_VERSION="1.0.0"' "$INST_INSTALLER_PATH.bak" || fail 'self-update backup'
 unset INST_INSTALLER_PATH
+export TEST_DOWNLOAD_LIB="$root/scripts/lib/download.sh"
 export TEST_OS=Darwin TEST_ARCH=arm64
 export INST_DESKTOP_CLAUDE_URL=https://example.invalid/claude.dmg
 inst --desktop --dry-run --desktop-dir "$scratch/Apps" > "$scratch/desktop-plan"

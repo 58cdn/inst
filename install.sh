@@ -108,7 +108,10 @@ inst_download() (
   candidates=$(inst_download_candidates "$1" "${3:-}")
   while IFS= read -r candidate; do
     index=$((index + 1))
-    if inst_download_attempt "$candidate" "$2" "${3:-}"; then exit 0; else rc=$?; fi
+    if inst_download_attempt "$candidate" "$2" "${3:-}"; then
+      [ -z "${4:-}" ] || printf '%s' "$candidate" > "$4"
+      exit 0
+    else rc=$?; fi
     echo "download: attempt failed ($rc); candidate $index" >&2
     case "$rc" in 130|143) exit "$rc";; esac
   done <<EOF_CANDIDATES
@@ -238,19 +241,26 @@ if [ "$base_explicit" -eq 0 ]; then
 fi
 
 tmp_script=$(mktemp "${TMPDIR:-/tmp}/inst.XXXXXX")
-trap 'rm -f "$tmp_script"' EXIT
+tmp_source=$(mktemp "${TMPDIR:-/tmp}/inst-source.XXXXXX")
+trap 'rm -f "$tmp_script" "$tmp_source"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 rc=0
-inst_download "$base/scripts/install-unix.sh" "$tmp_script" || rc=$?
+inst_download "$base/scripts/install-unix.sh" "$tmp_script" '' "$tmp_source" || rc=$?
 case "$rc" in 130|143) exit "$rc";; esac
 if [ "$rc" -ne 0 ] && [ "$base_explicit" -eq 0 ] && [ "$base" != "$DEFAULT_BASE_URL" ] && [ "$base" != https://raw.githubusercontent.com/58cdn/inst/master ]; then
   say "selected mirror download failed; retrying default $DEFAULT_BASE_URL"
   base=$DEFAULT_BASE_URL
   rm -f "$tmp_script"
   rc=0
-  inst_download "$base/scripts/install-unix.sh" "$tmp_script" || rc=$?
+  inst_download "$base/scripts/install-unix.sh" "$tmp_script" '' "$tmp_source" || rc=$?
 fi
 [ "$rc" -eq 0 ] || exit "$rc"
+base=$(cat "$tmp_source")
+base=${base%/scripts/install-unix.sh}
 # 通过管道运行时 stdin 是脚本本身，主脚本会自行从 /dev/tty 读取菜单输入。
-INST_RUN_MODE=remote INST_RAW_BASE_URL=$base bash "$tmp_script" "$@"
+if [ "$base_explicit" -eq 1 ]; then
+  INST_RUN_MODE=remote INST_RAW_BASE_URL=$base bash "$tmp_script" "$@"
+else
+  INST_RUN_MODE=remote INST_SELECTED_BASE_URL=$base bash "$tmp_script" "$@"
+fi

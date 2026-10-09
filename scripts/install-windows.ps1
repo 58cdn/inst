@@ -27,7 +27,7 @@ function Get-Default([string]$Value, [string]$EnvName, [string]$Fallback) {
   if ($fromEnv) { return $fromEnv }
   return $Fallback
 }
-$InstBase = Get-Default '' 'INST_RAW_BASE_URL' 'https://inst.linux.yun'
+$InstBase = Get-Default '' 'INST_RAW_BASE_URL' (Get-Default '' 'INST_SELECTED_BASE_URL' 'https://inst.linux.yun')
 $Prefix = Get-Default $Prefix 'INST_PREFIX' (Join-Path $env:LOCALAPPDATA 'inst')
 $PythonVersion = Get-Default $PythonVersion 'INST_PYTHON_VERSION' 'latest'
 $Region = Get-Default $Region 'INST_REGION' 'auto'
@@ -209,7 +209,8 @@ function Test-InstDownloadPrefix([string]$Url, [byte[]]$Bytes, [int]$Count, [str
   if ($path -match '\.(zip|msix)$' -and ($Count -lt 4 -or [BitConverter]::ToString($Bytes,0,4) -ne '50-4B-03-04')) { throw 'invalid ZIP prefix' }
   if ($path -match '\.exe$' -and ($Count -lt 2 -or $Bytes[0] -ne 77 -or $Bytes[1] -ne 90)) { throw 'invalid EXE prefix' }
   if ($path -match '\.sh$' -and -not $text.StartsWith('#!')) { throw 'invalid script prefix' }
-  if ($path -notmatch '\.(zip|msix|exe|sh|ps1|asc)$' -and $Count -lt 512) { throw 'unrecognized short response' }
+  if ($path -notmatch '\.(zip|msix|exe|sh|ps1|asc|cmd)$' -and $Count -lt 512) { throw 'unrecognized short response' }
+  if ($path -match '\.cmd$' -and $text.TrimStart([char]0xFEFF) -notmatch '\A(?i:@echo[ \t]+off)(?:\r?\n|$)') { throw 'invalid CMD prefix' }
   if ($path -match '\.ps1$' -and -not $text.TrimStart([char]0xFEFF).StartsWith('#')) { throw 'invalid PowerShell prefix' }
 }
 function Wait-InstDownloadTask($Task, $Cancellation) {
@@ -225,6 +226,7 @@ function New-InstDownloadClient {
 }
 function Save-InstDownloadAttempt([string]$Url, [string]$OutFile, [string]$Sha256 = '', [int]$StartSeconds = 30, [int]$IdleSeconds = 120) {
   Add-Type -AssemblyName System.Net.Http
+  $OutFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile)
   $uri = [Uri]$Url
   if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'public HTTPS URL required' }
   $client = New-InstDownloadClient
@@ -272,7 +274,8 @@ function Save-InstDownloadAttempt([string]$Url, [string]$OutFile, [string]$Sha25
     if ($null -ne $response.Content.Headers.ContentLength -and $total -ne $response.Content.Headers.ContentLength) { throw 'incomplete response' }
     $file.Dispose(); $file = $null
     if ($Sha256 -and (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash -ne $Sha256) { throw 'SHA256 mismatch' }
-    Move-Item -LiteralPath $temp -Destination $OutFile -Force
+    if ([IO.File]::Exists($OutFile)) { [IO.File]::Replace($temp, $OutFile, $null) }
+    else { [IO.File]::Move($temp, $OutFile) }
   } catch [OperationCanceledException] {
     throw 'download start/no-progress deadline exceeded'
   } finally {
@@ -300,11 +303,15 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
     }
   }
 }
-function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '') {
+function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '', [ref]$ResolvedUrl = $null) {
   $failures = @(); $index = 0
   foreach ($candidate in (Get-InstDownloadCandidates $Url $Sha256)) {
     $index++
-    try { Save-InstDownloadAttempt $candidate $OutFile $Sha256; return }
+    try {
+      Save-InstDownloadAttempt $candidate $OutFile $Sha256
+      if ($ResolvedUrl) { $ResolvedUrl.Value = $candidate }
+      return
+    }
     catch [Management.Automation.PipelineStoppedException] { throw }
     catch {
       $reason = "candidate ${index}: $($_.Exception.Message)"
@@ -331,11 +338,21 @@ function Invoke-OfficialPs1([string]$Url, [string[]]$ScriptArgs = @()) {
   if ($DryRun) { Write-Plan "下载并执行 $Url $($ScriptArgs -join ' ')"; return }
   # 在子进程中执行，避免官方脚本的 exit 关闭当前窗口。参数只来自内置表，不含用户输入。
   $temp = Join-Path ([IO.Path]::GetTempPath()) ('inst-official-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+  $executionFile = $temp + '.exec.ps1'
   try {
     Save-InstDownload $Url $temp
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $temp @ScriptArgs
+    # Keep downloaded bytes intact; Windows PowerShell 5.1 needs a BOM for UTF-8 -File.
+    $utf8 = New-Object Text.UTF8Encoding($false, $true)
+    $code = $utf8.GetString([IO.File]::ReadAllBytes($temp)).TrimStart([char]0xFEFF)
+    $tokens = $null; $errors = $null
+    [Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$errors) | Out-Null
+    if ($errors.Count) { throw 'official installer syntax validation failed' }
+    [IO.File]::WriteAllText($executionFile, $code, (New-Object Text.UTF8Encoding $true))
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $executionFile @ScriptArgs
     if ($LASTEXITCODE -ne 0) { throw "official installer failed ($LASTEXITCODE)" }
-  } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+  } finally {
+    Remove-Item -LiteralPath $temp, $executionFile -Force -ErrorAction SilentlyContinue
+  }
 
   Refresh-ProcessEnvironment
 }

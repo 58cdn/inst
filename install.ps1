@@ -16,7 +16,8 @@ function Test-InstDownloadPrefix([string]$Url, [byte[]]$Bytes, [int]$Count, [str
   if ($path -match '\.(zip|msix)$' -and ($Count -lt 4 -or [BitConverter]::ToString($Bytes,0,4) -ne '50-4B-03-04')) { throw 'invalid ZIP prefix' }
   if ($path -match '\.exe$' -and ($Count -lt 2 -or $Bytes[0] -ne 77 -or $Bytes[1] -ne 90)) { throw 'invalid EXE prefix' }
   if ($path -match '\.sh$' -and -not $text.StartsWith('#!')) { throw 'invalid script prefix' }
-  if ($path -notmatch '\.(zip|msix|exe|sh|ps1|asc)$' -and $Count -lt 512) { throw 'unrecognized short response' }
+  if ($path -notmatch '\.(zip|msix|exe|sh|ps1|asc|cmd)$' -and $Count -lt 512) { throw 'unrecognized short response' }
+  if ($path -match '\.cmd$' -and $text.TrimStart([char]0xFEFF) -notmatch '\A(?i:@echo[ \t]+off)(?:\r?\n|$)') { throw 'invalid CMD prefix' }
   if ($path -match '\.ps1$' -and -not $text.TrimStart([char]0xFEFF).StartsWith('#')) { throw 'invalid PowerShell prefix' }
 }
 function Wait-InstDownloadTask($Task, $Cancellation) {
@@ -32,6 +33,7 @@ function New-InstDownloadClient {
 }
 function Save-InstDownloadAttempt([string]$Url, [string]$OutFile, [string]$Sha256 = '', [int]$StartSeconds = 30, [int]$IdleSeconds = 120) {
   Add-Type -AssemblyName System.Net.Http
+  $OutFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile)
   $uri = [Uri]$Url
   if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'public HTTPS URL required' }
   $client = New-InstDownloadClient
@@ -79,7 +81,8 @@ function Save-InstDownloadAttempt([string]$Url, [string]$OutFile, [string]$Sha25
     if ($null -ne $response.Content.Headers.ContentLength -and $total -ne $response.Content.Headers.ContentLength) { throw 'incomplete response' }
     $file.Dispose(); $file = $null
     if ($Sha256 -and (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash -ne $Sha256) { throw 'SHA256 mismatch' }
-    Move-Item -LiteralPath $temp -Destination $OutFile -Force
+    if ([IO.File]::Exists($OutFile)) { [IO.File]::Replace($temp, $OutFile, $null) }
+    else { [IO.File]::Move($temp, $OutFile) }
   } catch [OperationCanceledException] {
     throw 'download start/no-progress deadline exceeded'
   } finally {
@@ -107,11 +110,15 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
     }
   }
 }
-function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '') {
+function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '', [ref]$ResolvedUrl = $null) {
   $failures = @(); $index = 0
   foreach ($candidate in (Get-InstDownloadCandidates $Url $Sha256)) {
     $index++
-    try { Save-InstDownloadAttempt $candidate $OutFile $Sha256; return }
+    try {
+      Save-InstDownloadAttempt $candidate $OutFile $Sha256
+      if ($ResolvedUrl) { $ResolvedUrl.Value = $candidate }
+      return
+    }
     catch [Management.Automation.PipelineStoppedException] { throw }
     catch {
       $reason = "candidate ${index}: $($_.Exception.Message)"
@@ -227,15 +234,18 @@ if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
       if (-not $explicitBase) { $base = Resolve-InstBaseUrl $base }
       $env:INST_RUN_MODE = 'remote'
       $temp = Join-Path ([IO.Path]::GetTempPath()) ("inst-" + [Guid]::NewGuid().ToString('N') + '.ps1')
+      $downloadedUrl = ''
       try {
-        Save-InstDownload "$base/scripts/install-windows.ps1" $temp
+        Save-InstDownload "$base/scripts/install-windows.ps1" $temp '' ([ref]$downloadedUrl)
       } catch [Management.Automation.PipelineStoppedException] { throw } catch {
         if ($explicitBase -or $base -in @('https://inst.linux.yun','https://raw.githubusercontent.com/58cdn/inst/master')) { throw }
         Write-Host '[inst] selected mirror download failed; retrying default https://inst.linux.yun'
         $base = 'https://inst.linux.yun'
-        Save-InstDownload "$base/scripts/install-windows.ps1" $temp
+        Save-InstDownload "$base/scripts/install-windows.ps1" $temp '' ([ref]$downloadedUrl)
       }
-      $env:INST_RAW_BASE_URL = $base
+      $base = $downloadedUrl.Substring(0, $downloadedUrl.Length - '/scripts/install-windows.ps1'.Length)
+      if ($explicitBase) { $env:INST_RAW_BASE_URL = $base }
+      else { $env:INST_SELECTED_BASE_URL = $base }
       $bytes = [IO.File]::ReadAllBytes($temp)
       $code = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
       $tokens = $null; $errors = $null

@@ -121,6 +121,7 @@ done
 [ "$(inst_download_candidates https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh | wc -l | tr -d ' ')" = 1 ]
 [ "$(inst_download_candidates https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh abc | wc -l | tr -d ' ')" = 2 ]
 [ "$(INST_RAW_BASE_URL=https://inst.linux.yun inst_download_candidates https://inst.linux.yun/install.sh | wc -l | tr -d ' ')" = 1 ]
+[ "$(INST_SELECTED_BASE_URL=https://inst.linux.yun inst_download_candidates https://inst.linux.yun/scripts/install-unix.sh | wc -l | tr -d ' ')" = 2 ]
 [ "$(INST_MIRROR_AUTO=0 inst_download_candidates https://inst.linux.yun/install.sh | wc -l | tr -d ' ')" = 1 ]
 inst_download_attempt() { echo attempt >> "$tmp/log"; case "$1" in https://inst.linux.yun/*) return 28;; *) echo valid > "$2";; esac; }
 inst_download https://inst.linux.yun/scripts/install-unix.sh "$tmp/out"

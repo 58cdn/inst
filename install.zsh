@@ -105,7 +105,10 @@ inst_download() (
   candidates=$(inst_download_candidates "$1" "${3:-}")
   while IFS= read -r candidate; do
     index=$((index + 1))
-    if inst_download_attempt "$candidate" "$2" "${3:-}"; then exit 0; else rc=$?; fi
+    if inst_download_attempt "$candidate" "$2" "${3:-}"; then
+      [ -z "${4:-}" ] || printf '%s' "$candidate" > "$4"
+      exit 0
+    else rc=$?; fi
     echo "download: attempt failed ($rc); candidate $index" >&2
     case "$rc" in 130|143) exit "$rc";; esac
   done <<EOF_CANDIDATES

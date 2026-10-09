@@ -9,7 +9,7 @@ DRY_RUN=0; ASSUME_YES=0; INTERACTIVE=0; QUIET=0
 DO_NODE=0; DO_PYTHON=0; DO_MIRRORS=0; DO_AGENTS=0; DO_DESKTOP=0; DO_ENDPOINT=0
 DO_CHECK=0; DO_UPDATE=0; DO_SELF_UPDATE=0; DO_SHORTCUT=0; DO_MENU=0
 APPLY_SYSTEM_MIRROR=0; WITH_BUILD_DEPS=0
-BASE_URL="${INST_RAW_BASE_URL:-https://inst.linux.yun}"
+BASE_URL="${INST_RAW_BASE_URL:-${INST_SELECTED_BASE_URL:-https://inst.linux.yun}}"
 PREFIX="${INST_PREFIX:-$HOME/.local/inst}"
 ENV_DIR="${INST_ENV_DIR:-$HOME/.config/inst}"
 ENV_FILE="$ENV_DIR/env.sh"
@@ -301,7 +301,10 @@ inst_download() (
   candidates=$(inst_download_candidates "$1" "${3:-}")
   while IFS= read -r candidate; do
     index=$((index + 1))
-    if inst_download_attempt "$candidate" "$2" "${3:-}"; then exit 0; else rc=$?; fi
+    if inst_download_attempt "$candidate" "$2" "${3:-}"; then
+      [ -z "${4:-}" ] || printf '%s' "$candidate" > "$4"
+      exit 0
+    else rc=$?; fi
     echo "download: attempt failed ($rc); candidate $index" >&2
     case "$rc" in 130|143) exit "$rc";; esac
   done <<EOF_CANDIDATES

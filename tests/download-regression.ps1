@@ -13,8 +13,17 @@ using System.Threading.Tasks;
 public class InstTestHandler : HttpMessageHandler {
   public static string Mode;
   public static int Calls;
+  public static string FixtureRoot;
+  public static byte[] BootstrapBody;
   protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, CancellationToken ct) {
     Calls++;
+    if (Mode == "bootstrap") {
+      if (req.RequestUri.Host == "inst.linux.yun") return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+      return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(BootstrapBody) };
+    }
+    if (Mode == "fixture") return new HttpResponseMessage(HttpStatusCode.OK) {
+      Content = new ByteArrayContent(File.ReadAllBytes(Path.Combine(FixtureRoot, Path.GetFileName(req.RequestUri.AbsolutePath))))
+    };
     if (Mode == "headers") await Task.Delay(5000, ct);
     if (Mode == "redirect") {
       await Task.Delay(600, ct);
@@ -73,6 +82,112 @@ try {
     if ($mode -eq 'slow' -and $watch.Elapsed.TotalSeconds -lt 3) { throw 'slow download was not exercised' }
     Write-Host "PASS: $mode"
   }
+  # File.Replace must fail safely if an existing destination denies delete/replace.
+  [InstTestHandler]::Mode = 'ok'
+  [IO.File]::WriteAllText($out,'locked original')
+  $lock = [IO.File]::Open($out, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  $failed = $false
+  try { Save-InstDownloadAttempt 'https://example.org/a.sh' $out }
+  catch { $failed = $true }
+  finally { $lock.Dispose() }
+  if (-not $failed -or [IO.File]::ReadAllText($out) -ne 'locked original') { throw 'replacement failure lost original' }
+  if (@(Get-ChildItem $dir -Filter '*.part.*').Count) { throw 'replacement failure leaked temporary file' }
+  Write-Host 'PASS: locked destination survives replacement failure'
+  # The real remote cgpu.cmd is 248 bytes: accept its CMD header, not arbitrary short bodies.
+  [InstTestHandler]::Mode = 'fixture'
+  [InstTestHandler]::FixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../scripts'))
+  Save-InstDownloadAttempt 'https://inst.linux.yun/scripts/cgpu.cmd' $out
+  if ((Get-FileHash $out).Hash -ne (Get-FileHash (Join-Path ([InstTestHandler]::FixtureRoot) 'cgpu.cmd')).Hash) { throw 'small remote CMD changed' }
+  [InstTestHandler]::Mode = 'ok'
+  $rejected = $false
+  try { Save-InstDownloadAttempt 'https://inst.linux.yun/scripts/cgpu.cmd' $out }
+  catch { $rejected = $_.Exception.Message -match 'invalid CMD prefix' }
+  if (-not $rejected) { throw 'CMD accepted a non-CMD body' }
+
+  # Exercise actual Install-Cgpu with no adjacent assets, a real HttpClient, and isolated writes.
+  $remote = Join-Path $dir 'remote'; New-Item -ItemType Directory $remote | Out-Null
+  $remoteInstaller = Join-Path $remote 'install-windows.ps1'
+  Copy-Item (Join-Path $PSScriptRoot '../scripts/install-windows.ps1') $remoteInstaller
+  $savedProfile = $env:USERPROFILE
+  $savedRaw = $env:INST_RAW_BASE_URL; $savedSelected = $env:INST_SELECTED_BASE_URL
+  $env:USERPROFILE = $remote; $env:INST_RAW_BASE_URL = $null
+  $env:INST_SELECTED_BASE_URL = 'https://inst.linux.yun'
+  [InstTestHandler]::Mode = 'fixture'; [InstTestHandler]::Calls = 0
+  $runner = [PowerShell]::Create()
+  try {
+    $null = $runner.AddScript({ param($Installer)
+      $ErrorActionPreference = 'Stop'
+      . $Installer -LibOnly
+      function New-InstDownloadClient { return New-Object Net.Http.HttpClient((New-Object InstTestHandler)) }
+      function Add-UserPath { param($Path,[switch]$Force) }
+      if ($InstBase -ne 'https://inst.linux.yun') { throw 'automatic base lost' }
+      if (@(Get-InstDownloadCandidates ($InstBase + '/scripts/install-windows.ps1')).Count -ne 2) { throw 'automatic base disabled self-update fallback' }
+      Install-Cgpu
+    }).AddArgument($remoteInstaller)
+    $null = $runner.Invoke()
+    if ($runner.HadErrors) { throw ($runner.Streams.Error | Out-String) }
+    if ([InstTestHandler]::Calls -ne 3) { throw 'remote cgpu downloads were not exercised' }
+    foreach ($name in @('cgpu.ps1','cgpu.cmd','cgpu.md')) {
+      if ((Get-FileHash (Join-Path $remote ('.command/' + $name))).Hash -ne (Get-FileHash (Join-Path ([InstTestHandler]::FixtureRoot) $name)).Hash) { throw "remote cgpu mismatch: $name" }
+    }
+    $env:INST_RAW_BASE_URL = 'https://inst.linux.yun'
+    if (@(Get-InstDownloadCandidates 'https://inst.linux.yun/scripts/install-windows.ps1').Count -ne 1) { throw 'explicit override lost' }
+  } finally {
+    $runner.Dispose(); $env:USERPROFILE = $savedProfile
+    $env:INST_RAW_BASE_URL = $savedRaw; $env:INST_SELECTED_BASE_URL = $savedSelected
+  }
+  Write-Host 'PASS: real small CMD, remote Install-Cgpu, automatic self-update fallback and explicit override'
+  # Full remote bootstrap: first official source fails, second source launches a child.
+  $bootstrap = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../install.ps1'))
+  $bootstrap = $bootstrap.Replace('return New-Object Net.Http.HttpClient($handler)', 'return New-Object Net.Http.HttpClient((New-Object InstTestHandler))')
+  $bootstrap = $bootstrap.Replace("if (`$env:INST_BOOTSTRAP_LIB_ONLY -eq '1')", "function Resolve-InstBaseUrl { return 'https://inst.linux.yun' }; if (`$env:INST_BOOTSTRAP_LIB_ONLY -eq '1')")
+  $child = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../scripts/lib/download.ps1')) + @'
+
+if ($env:INST_RAW_BASE_URL) { throw 'automatic selection became explicit' }
+if ($env:INST_SELECTED_BASE_URL -ne 'https://raw.githubusercontent.com/58cdn/inst/master') { throw 'lost successful source' }
+if (@(Get-InstDownloadCandidates ($env:INST_SELECTED_BASE_URL + '/scripts/install-windows.ps1')).Count -ne 2) { throw 'self-update fallback disabled' }
+Write-Output 'bootstrap-child-ok'
+'@
+  [InstTestHandler]::BootstrapBody = [Text.Encoding]::UTF8.GetBytes($child)
+  [InstTestHandler]::Mode = 'bootstrap'; [InstTestHandler]::Calls = 0
+  $savedRaw = $env:INST_RAW_BASE_URL; $savedSelected = $env:INST_SELECTED_BASE_URL
+  $savedAuto = $env:INST_MIRROR_AUTO; $savedMode = $env:INST_RUN_MODE
+  $env:INST_RAW_BASE_URL = $null; $env:INST_SELECTED_BASE_URL = $null; $env:INST_MIRROR_AUTO = $null
+  $runner = [PowerShell]::Create()
+  try {
+    $null = $runner.AddScript({ param($Code) & ([scriptblock]::Create($Code)) -Version }).AddArgument($bootstrap)
+    $result = $runner.Invoke() | Out-String
+    if ($runner.HadErrors -or $result -notmatch 'bootstrap-child-ok' -or [InstTestHandler]::Calls -ne 2) { throw "remote bootstrap failed: $result $($runner.Streams.Error | Out-String)" }
+  } finally {
+    $runner.Dispose(); $env:INST_RAW_BASE_URL = $savedRaw; $env:INST_SELECTED_BASE_URL = $savedSelected
+    $env:INST_MIRROR_AUTO = $savedAuto; $env:INST_RUN_MODE = $savedMode
+  }
+  Write-Host 'PASS: full bootstrap retains actual successful base and self-update fallback'
+
+  # Official script execution must preserve UTF-8 without a BOM on Windows PowerShell 5.1.
+  $fixtures = Join-Path $dir 'official'; New-Item -ItemType Directory $fixtures | Out-Null
+  $value = [string][char]0x4e2d + [char]0x6587
+  $unicodeCode = "# UTF-8 fixture`n`$value = '$value'`nif (`$value -cne ([string][char]0x4e2d + [char]0x6587)) { exit 9 }`n[IO.File]::WriteAllText(`$args[0], `$value)"
+  [IO.File]::WriteAllText((Join-Path $fixtures 'unicode.ps1'), $unicodeCode, (New-Object Text.UTF8Encoding $false))
+  [IO.File]::WriteAllBytes((Join-Path $fixtures 'invalid.ps1'), [byte[]](35,10,255))
+  [InstTestHandler]::Mode = 'fixture'; [InstTestHandler]::FixtureRoot = $fixtures
+  $runner = [PowerShell]::Create()
+  try {
+    $null = $runner.AddScript({ param($Installer,$Target)
+      $ErrorActionPreference = 'Stop'
+      . $Installer -LibOnly
+      function New-InstDownloadClient { return New-Object Net.Http.HttpClient((New-Object InstTestHandler)) }
+      function Refresh-ProcessEnvironment { }
+      Invoke-OfficialPs1 'https://example.org/unicode.ps1' @($Target)
+      $rejected = $false
+      try { Invoke-OfficialPs1 'https://example.org/invalid.ps1' @($Target) }
+      catch { $rejected = $true }
+      if (-not $rejected) { throw 'invalid UTF-8 accepted' }
+    }).AddArgument($remoteInstaller).AddArgument($out)
+    $null = $runner.Invoke()
+    if ($runner.HadErrors -or [IO.File]::ReadAllText($out) -cne $value) { throw "official UTF-8 execution failed: $($runner.Streams.Error | Out-String)" }
+  } finally { $runner.Dispose() }
+  Write-Host 'PASS: official Unicode script runs unchanged in PS5.1; invalid UTF-8 rejected'
   # Stop a running PowerShell pipeline (Ctrl+C equivalent) and verify finally cleanup.
   [InstTestHandler]::Mode = 'no-data'
   $runner = [PowerShell]::Create()
