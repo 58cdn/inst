@@ -133,7 +133,8 @@ if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
     foreach ($item in $Forward) { $childArgs += [string]$item }
     & $hostExe @childArgs
     $global:LASTEXITCODE = $LASTEXITCODE
-    if ($global:LASTEXITCODE -eq 0) {
+    $readOnly = @($Forward | Where-Object { $_ -in @('-Check','-Version','-Help','-DryRun') }).Count -gt 0
+    if ($global:LASTEXITCODE -eq 0 -and -not $readOnly) {
       try { Refresh-InstCallerEnvironment }
       catch { Write-Host "[inst] parent shell environment refresh failed: $_" -ForegroundColor Yellow }
     }
