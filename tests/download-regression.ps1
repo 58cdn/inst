@@ -47,7 +47,7 @@ public class InstTestStream : Stream {
   public override bool CanWrite { get { return false; } }
   public override long Length { get { throw new NotSupportedException(); } }
   public override long Position { get { throw new NotSupportedException(); } set { throw new NotSupportedException(); } }
-  public override int Read(byte[] b,int o,int c) { throw new NotSupportedException(); }
+  public override int Read(byte[] b,int o,int c) { return ReadAsync(b,o,c,CancellationToken.None).GetAwaiter().GetResult(); }
   public override void Flush() { }
   public override long Seek(long o,SeekOrigin s) { throw new NotSupportedException(); }
   public override void SetLength(long l) { throw new NotSupportedException(); }
@@ -108,8 +108,9 @@ try {
       $runner = [PowerShell]::Create()
       $null = $runner.AddScript($cmdCode)
       $null = $runner.Invoke()
+      $diagnostics = ($runner.Streams.Warning | Out-String) + ($runner.Streams.Error | Out-String)
       $runner.Dispose()
-      if ((Test-Path -LiteralPath $out) -ne ($mode -eq 'ok')) { throw "CMD bootstrap result: $mode" }
+      if ((Test-Path -LiteralPath $out) -ne ($mode -eq 'ok')) { throw "CMD bootstrap result: $mode $diagnostics" }
       if ($mode -eq 'error' -and [InstTestHandler]::Calls -ne 2) { throw 'CMD bootstrap bounded fallback failed' }
     }
   } finally { $env:INST_BOOTSTRAP_BASE = $savedBase; $env:INST_BOOTSTRAP_FILE = $savedFile }
