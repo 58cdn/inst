@@ -38,4 +38,20 @@ if (-not $resolved -or $resolved.Version -ne '24.20.0') {
   throw "JSON array LTS resolution failed: $($resolved | Out-String)"
 }
 'PASS: Node LTS selection skips an unavailable mirror asset and unwraps JSON arrays'
+
+# A catalog can advertise an LTS version that nvm cannot actually install.
+# Retry an older LTS from the same mirror before failing the entire component.
+$script:attempts = @()
+function Set-NvmNodeMirror([string]$NvmExe, [string]$Mirror) { }
+function Invoke-NodeCommand([string]$Executable, [string[]]$Arguments) {
+  if ($Arguments[0] -ne 'install') { throw 'unexpected nvm command' }
+  $script:attempts += $Arguments[1]
+  if ($Arguments[1] -eq '24.21.0') { throw 'simulated: version not available for download' }
+}
+$script:NodeVersionCatalog = $catalog
+$target = Install-NodeLtsWithRecovery (Join-Path $env:TEMP 'nvm-test\nvm.exe') $false
+if ($target -ne '24.20.0' -or ($script:attempts -join ',') -ne '24.21.0,24.20.0') {
+  throw "Node install fallback failed: $target; attempted $($script:attempts -join ',')"
+}
+'PASS: Node LTS nvm install failures automatically retry older releases'
 exit 0
