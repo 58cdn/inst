@@ -179,18 +179,36 @@ Write-Output 'bootstrap-child-ok'
       function New-InstDownloadClient { return New-Object Net.Http.HttpClient((New-Object InstTestHandler)) }
       function Refresh-ProcessEnvironment { }
       Invoke-OfficialPs1 'https://example.org/unicode.ps1' @($Target)
-      $rejected = $false
-      try { Invoke-OfficialPs1 'https://example.org/invalid.ps1' @($Target) }
-      catch { $rejected = $true }
-      if (-not $rejected) { throw 'invalid UTF-8 accepted' }
       Write-Output 'official-script-validated'
     }).AddArgument($remoteInstaller).AddArgument($out)
     $result = $runner.Invoke() | Out-String
     $actual = [IO.File]::ReadAllText($out)
-    # Expected/caught decoder errors can set HadErrors; require explicit completion instead.
-    if ($result -notmatch 'official-script-validated' -or $actual -cne $value) {
+    Write-Host "Unicode success: HadErrors=$($runner.HadErrors), UTF8=$([BitConverter]::ToString([Text.Encoding]::UTF8.GetBytes($actual)))"
+    if ($runner.HadErrors -or $result -notmatch 'official-script-validated' -or $actual -cne $value) {
       throw "official UTF-8 execution failed: result=$result bytes=$([BitConverter]::ToString([Text.Encoding]::UTF8.GetBytes($actual))) $($runner.Streams.Error | Out-String)"
     }
+  } finally { $runner.Dispose() }
+  # A separate runspace isolates the expected decoder failure from the success assertion.
+  $runner = [PowerShell]::Create()
+  try {
+    $null = $runner.AddScript({ param($Installer,$Target)
+      $ErrorActionPreference = 'Stop'
+      . $Installer -LibOnly
+      function New-InstDownloadClient { return New-Object Net.Http.HttpClient((New-Object InstTestHandler)) }
+      function Refresh-ProcessEnvironment { }
+      $rejected = $false
+      try { Invoke-OfficialPs1 'https://example.org/invalid.ps1' @($Target) }
+      catch {
+        $cause = $_.Exception
+        while ($cause.InnerException) { $cause = $cause.InnerException }
+        $rejected = $cause -is [Text.DecoderFallbackException]
+      }
+      if (-not $rejected) { throw 'invalid UTF-8 was not rejected by the strict decoder' }
+      Write-Output 'invalid-utf8-rejected'
+    }).AddArgument($remoteInstaller).AddArgument($out)
+    $result = $runner.Invoke() | Out-String
+    Write-Host "Unicode rejection: HadErrors=$($runner.HadErrors), completed=$($result -match 'invalid-utf8-rejected')"
+    if ($result -notmatch 'invalid-utf8-rejected' -or [IO.File]::ReadAllText($out) -cne $value) { throw "UTF-8 rejection failed: $result $($runner.Streams.Error | Out-String)" }
   } finally { $runner.Dispose() }
   Write-Host 'PASS: official Unicode script runs unchanged in PS5.1; invalid UTF-8 rejected'
   # Stop a running PowerShell pipeline (Ctrl+C equivalent) and verify finally cleanup.
