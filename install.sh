@@ -243,6 +243,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 rc=0
 inst_download "$base/scripts/install-unix.sh" "$tmp_script" || rc=$?
+case "$rc" in 130|143) exit "$rc";; esac
 if [ "$rc" -ne 0 ] && [ "$base_explicit" -eq 0 ] && [ "$base" != "$DEFAULT_BASE_URL" ] && [ "$base" != https://raw.githubusercontent.com/58cdn/inst/master ]; then
   say "selected mirror download failed; retrying default $DEFAULT_BASE_URL"
   base=$DEFAULT_BASE_URL

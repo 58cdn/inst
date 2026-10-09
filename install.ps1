@@ -229,7 +229,7 @@ if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
       $temp = Join-Path ([IO.Path]::GetTempPath()) ("inst-" + [Guid]::NewGuid().ToString('N') + '.ps1')
       try {
         Save-InstDownload "$base/scripts/install-windows.ps1" $temp
-      } catch {
+      } catch [Management.Automation.PipelineStoppedException] { throw } catch {
         if ($explicitBase -or $base -in @('https://inst.linux.yun','https://raw.githubusercontent.com/58cdn/inst/master')) { throw }
         Write-Host '[inst] selected mirror download failed; retrying default https://inst.linux.yun'
         $base = 'https://inst.linux.yun'

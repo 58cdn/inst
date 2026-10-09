@@ -92,6 +92,28 @@ try {
   foreach ($url in @('https://example.org/a.sh','https://inst.linux.yun/scripts/install-unix.sh?token=secret','https://u:p@inst.linux.yun/scripts/install-unix.sh')) {
     if (@(Get-InstDownloadCandidates $url).Count -ne 1) { throw 'unsafe mirror mapping' }
   }
+  # Parse and execute the CMD outer bootstrap in an isolated runspace with HTTP mocked.
+  $cmd = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../install.cmd'))
+  $cmdCode = [regex]::Match($cmd, '(?m)^powershell.exe -NoProfile -Command "(.*)"\r?$').Groups[1].Value
+  $tokens = $null; $errors = $null
+  [Management.Automation.Language.Parser]::ParseInput($cmdCode,[ref]$tokens,[ref]$errors) | Out-Null
+  if (-not $cmdCode -or $errors.Count) { throw 'CMD bootstrap parse failed' }
+  $cmdCode = $cmdCode.Replace('$c=New-Object Net.Http.HttpClient($h)', '$c=New-Object Net.Http.HttpClient((New-Object InstTestHandler))')
+  $savedBase = $env:INST_BOOTSTRAP_BASE; $savedFile = $env:INST_BOOTSTRAP_FILE
+  $env:INST_BOOTSTRAP_BASE = 'https://inst.linux.yun'; $env:INST_BOOTSTRAP_FILE = $out
+  try {
+    foreach ($mode in @('ok','error')) {
+      Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+      [InstTestHandler]::Mode = $mode; [InstTestHandler]::Calls = 0
+      $runner = [PowerShell]::Create()
+      $null = $runner.AddScript($cmdCode)
+      $null = $runner.Invoke()
+      $runner.Dispose()
+      if ((Test-Path -LiteralPath $out) -ne ($mode -eq 'ok')) { throw "CMD bootstrap result: $mode" }
+      if ($mode -eq 'error' -and [InstTestHandler]::Calls -ne 2) { throw 'CMD bootstrap bounded fallback failed' }
+    }
+  } finally { $env:INST_BOOTSTRAP_BASE = $savedBase; $env:INST_BOOTSTRAP_FILE = $savedFile }
+  Write-Host 'PASS: CMD bootstrap no-curl path, syntax and bounded fallback'
   $script:calls = 0
   function Save-InstDownloadAttempt { param($Url,$OutFile,$Sha256); $script:calls++; if ($script:calls -eq 1) { throw 'timeout' }; [IO.File]::WriteAllText($OutFile,'valid') }
   Save-InstDownload 'https://inst.linux.yun/scripts/install-unix.sh' $out
