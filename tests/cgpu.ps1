@@ -14,8 +14,15 @@ try {
   $output = & cmd.exe /d /c ('"{0}" -Once' -f $cmd) 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0 -or $output -notmatch 'CGPU_TEST_GPU') { throw "cgpu.cmd -Once failed: $output" }
 
-  $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -Interval 0 -Once 2>&1 | Out-String
-  if ($LASTEXITCODE -eq 0) { throw 'cgpu should reject interval 0' }
+  # PowerShell 5.1 treats native stderr as an error record with Stop enabled.
+  $ErrorActionPreference = 'Continue'
+  try {
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -Interval 0 -Once 2>&1 | Out-String
+    $invalidIntervalExit = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = 'Stop'
+  }
+  if ($invalidIntervalExit -eq 0) { throw 'cgpu should reject interval 0' }
 
   $env:INST_NO_TTY = '1'
   $env:INST_NO_UPDATE_CHECK = '1'
