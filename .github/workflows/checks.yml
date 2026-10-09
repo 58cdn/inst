@@ -20,6 +20,8 @@ jobs:
           if command -v zsh >/dev/null; then zsh -n install.zsh; fi
           bash -n scripts/install-unix.sh
           node --check tools/update-versions.mjs
+          node tools/embed-download.mjs --check
+          python3 tests/download-regression.py
           bash tests/unix-regression.sh
       - name: Site build and Worker routing
         run: |
@@ -32,6 +34,7 @@ jobs:
       - name: Windows PowerShell checks
         shell: powershell
         run: |
+          ./tests/download-regression.ps1
           ./tests/check-readonly.ps1
           ./tests/node-version.ps1
           ./tests/python-version.ps1

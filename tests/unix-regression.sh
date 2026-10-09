@@ -26,9 +26,10 @@ cat > "$scratch/bin/curl" <<'EOF'
 url=''; out=''; format=''
 while (($#)); do
   case "$1" in
+    -D) printf 'HTTP/1.1 200 OK\r\n\r\n' > "$2"; shift 2;;
     -o) out="$2"; shift 2;;
     -w) format="$2"; shift 2;;
-    --proto|--proto-redir|--retry|--connect-timeout|--max-time) shift 2;;
+    --proto|--proto-redir|--retry|--connect-timeout|--max-time|--max-redirs) shift 2;;
     --*) shift;;
     *) url="$1"; shift;;
   esac
@@ -155,7 +156,7 @@ test -z "$(find "$scratch" -name 'local-installer.tmp.*' -print)"
 mkdir -p "$scratch/curlbin"
 cat > "$scratch/curlbin/curl" <<'EOF'
 #!/usr/bin/env bash
-out=''; while (($#)); do [[ "$1" == -o ]] && { out="$2"; shift; }; shift; done
+out=''; while (($#)); do [[ "$1" == -D ]] && { printf 'HTTP/1.1 200 OK\r\n\r\n' > "$2"; }; [[ "$1" == -o ]] && { out="$2"; shift; }; shift; done
 printf '%s' "$FAKE_REMOTE" > "$out"
 EOF
 chmod +x "$scratch/curlbin/curl"
