@@ -303,7 +303,9 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
     }
   }
 }
-function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '', [ref]$ResolvedUrl = $null) {
+function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '', $ResolvedUrl = $null) {
+  # Optional [ref] output; a typed [ref] default rejects omitted arguments in PS5.1.
+  if ($null -ne $ResolvedUrl -and $ResolvedUrl -isnot [System.Management.Automation.PSReference]) { throw 'ResolvedUrl must be a reference' }
   $failures = @(); $index = 0
   foreach ($candidate in (Get-InstDownloadCandidates $Url $Sha256)) {
     $index++
