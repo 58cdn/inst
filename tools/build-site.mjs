@@ -11,6 +11,7 @@ const dist = join(root, 'dist');
 const files = [
   ['install.sh'], ['install.zsh'], ['install.ps1'], ['install.cmd'], ['VERSION'], ['README.md'], ['mirrors.json'],
   ['scripts/install-unix.sh'], ['scripts/install-windows.ps1'],
+  ['scripts/cgpu.ps1'], ['scripts/cgpu.cmd'], ['scripts/cgpu.md'],
   ['site/index.html', 'index.html'], ['site/_headers', '_headers'],
 ];
 

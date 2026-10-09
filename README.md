@@ -56,6 +56,7 @@ $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; 
  7  一键安装         1 + 2 + 3 + 4
  8  环境检查
  9  更新已安装工具
+ 10  cgpu 显卡监控     Windows CMD / PowerShell，1 秒刷新 nvidia-smi
  00 脚本更新         立即更新 / 开启或关闭每日自动更新
  88 安装快捷命令
  0  退出
@@ -139,6 +140,27 @@ API Key 只从环境变量 `INST_API_KEY` 或隐藏输入读取，不接受命�
 - `nvm-windows 2.x` 当前只有安装器或其他资产，不符合现有免安装流程，因此会被自动跳过，直到上游提供兼容资产。
 - PR 需要先通过现有安装器检查，再由维护者审核合并；仓库需允许 Actions 的 `GITHUB_TOKEN` 写入内容、Pull Request 和 Actions 运行权限。
 
+### 9. cgpu（Windows NVIDIA 显卡实时监控）
+
+Windows 用户可通过菜单 **10** 或非交互参数 `-Cgpu` 安装：
+
+```powershell
+& ([scriptblock]::Create((irm https://inst.linux.yun/install.ps1))) -Cgpu
+# 直接通过 GitHub：
+$env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'
+& ([scriptblock]::Create((irm "$env:INST_RAW_BASE_URL/install.ps1"))) -Cgpu
+```
+
+安装时会在 `%USERPROFILE%\.command\` 创建 `cgpu.ps1`、`cgpu.cmd`、`cgpu.md`，并将该目录加入**用户 PATH**（重新打开 CMD / PowerShell 后生效）。不会永久修改 ExecutionPolicy，也不需要管理员权限；已有内容不同时会创建一次 `*.inst.bak` 备份。
+
+```powershell
+cgpu              # 每秒清屏刷新 nvidia-smi，Ctrl+C 退出
+cgpu -Interval 2  # 每 2 秒刷新
+cgpu -Once        # 仅查看一次
+```
+
+依赖 NVIDIA 显卡驱动提供的 `nvidia-smi`；未安装驱动或找不到命令时给出错误。CMD 包装器优先使用 PowerShell 7，未找到则使用 Windows PowerShell 5.1。
+
 ## 常用参数
 
 ```bash
@@ -204,6 +226,7 @@ inst -All -DryRun
 - `install.ps1`：PowerShell 引导，纯 ASCII，可安全用于 `irm | iex`
 - `install.cmd`：cmd 入口（CRLF 换行）
 - `scripts/install-unix.sh`：Unix 实现（兼容 bash 3.2）
+- `scripts/cgpu.ps1`、`scripts/cgpu.cmd`、`scripts/cgpu.md`：Windows 显卡监控命令与帮助
 - `scripts/install-windows.ps1`：Windows 实现（UTF-8 BOM，兼容 PowerShell 5.1）
 - `site/`：说明页 `index.html` 与响应头 `_headers`
 - `mirrors.json`：远程 bootstrap 探测的官网镜像节点清单
@@ -220,5 +243,5 @@ node tools/build-site.mjs && node tests/worker.test.mjs
 ```
 
 ```powershell
-./tests/check-readonly.ps1; ./tests/python-version.ps1; ./tests/windows-regression.ps1
+./tests/check-readonly.ps1; ./tests/python-version.ps1; ./tests/windows-regression.ps1; ./tests/cgpu.ps1
 ```

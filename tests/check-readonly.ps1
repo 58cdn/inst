@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-foreach ($file in @('install.ps1', 'scripts\install-windows.ps1')) {
+foreach ($file in @('install.ps1', 'scripts\install-windows.ps1', 'scripts\cgpu.ps1')) {
   $tokens = $null
   $errors = $null
   $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $file), [ref]$tokens, [ref]$errors)

@@ -3,7 +3,7 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
   [switch]$All, [switch]$Node, [switch]$Python, [switch]$Mirrors, [switch]$Agents, [switch]$Desktop,
-  [switch]$Check, [switch]$Update, [switch]$SelfUpdate, [switch]$InstallShortcut, [switch]$Menu,
+  [switch]$Check, [switch]$Update, [switch]$SelfUpdate, [switch]$InstallShortcut, [switch]$Cgpu, [switch]$Menu,
   [switch]$DryRun, [switch]$Yes, [switch]$Quiet, [switch]$Version, [switch]$Help, [switch]$LibOnly,
   [switch]$OfficialAgents, [switch]$ApplySystemMirror,
   [string]$AgentList, [string]$AgentMethod, [string]$AgentPackages,
@@ -938,6 +938,51 @@ function Update-Installer {
   Save-ScriptFile $target $code
   Write-Ok "已更新: $target (v$current -> v$newVersion)，备份: $target.bak"
 }
+# ---------------------------------------------------------------- cgpu (Windows NVIDIA GPU monitor)
+function Install-Cgpu {
+  $destination = Join-Path $env:USERPROFILE '.command'
+  $names = @('cgpu.ps1', 'cgpu.cmd', 'cgpu.md')
+  if ($DryRun) {
+    foreach ($name in $names) { Write-Plan "安装 $(Join-Path $destination $name)" }
+    Add-UserPath $destination -Force
+    return
+  }
+  $sourceDir = Split-Path -Parent $PSCommandPath
+  $staging = Join-Path ([IO.Path]::GetTempPath()) ('inst-cgpu-' + [Guid]::NewGuid().ToString('N'))
+  try {
+    New-Item -ItemType Directory -Force -Path $staging | Out-Null
+    foreach ($name in $names) {
+      $tempFile = Join-Path $staging $name
+      $localFile = Join-Path $sourceDir $name
+      if ($sourceDir -and (Test-Path -LiteralPath $localFile)) {
+        Copy-Item -LiteralPath $localFile -Destination $tempFile
+      } else {
+        Save-Download ($InstBase.TrimEnd('/') + '/scripts/' + $name) $tempFile
+      }
+      if ((Get-Item -LiteralPath $tempFile).Length -eq 0) { throw "cgpu 文件为空: $name" }
+    }
+    $tokens = $null; $parseErrors = $null
+    [Management.Automation.Language.Parser]::ParseFile((Join-Path $staging 'cgpu.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if ($parseErrors.Count) { throw "cgpu.ps1 语法错误: $($parseErrors[0])" }
+
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    foreach ($name in $names) {
+      $source = Join-Path $staging $name
+      $target = Join-Path $destination $name
+      if (Test-Path -LiteralPath $target) {
+        if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) { continue }
+        $backup = "$target.inst.bak"
+        if (-not (Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $target -Destination $backup }
+      }
+      Copy-Item -LiteralPath $source -Destination $target -Force
+    }
+    Add-UserPath $destination -Force
+    Write-Ok "已安装 cgpu（cmd / PowerShell）：$destination；新开终端输入 cgpu"
+  } finally {
+    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+}
+
 function Install-Shortcut {
   Write-Step '安装快捷命令 inst'
   if ($DryRun) { Write-Plan "保存脚本到 $ShortcutScript，并创建 $ShortcutBin\inst.cmd"; return }
@@ -1121,6 +1166,7 @@ function Show-MainMenu {
     Write-MenuLine 7 '一键安装' '1 + 2 + 3 + 4'
     Write-MenuLine 8 '环境检查'
     Write-MenuLine 9 '更新已安装工具'
+    Write-MenuLine 10 'cgpu 显卡监控' '安装 CMD / PowerShell 一秒刷新命令'
     Write-Host '------------------------------------------------'
     Write-MenuLine 00 '脚本更新' $(if (Test-Path -LiteralPath $ShortcutScript) { '快捷命令: inst' } else { '' })
     Write-MenuLine 88 '安装快捷命令' 'inst'
@@ -1136,6 +1182,7 @@ function Show-MainMenu {
       '7' { Invoke-MenuAction { Set-Mirrors; Install-Node; Install-Python; Install-Agents } | Out-Null }
       '8' { Invoke-MenuAction { Show-Check } | Out-Null }
       '9' { Invoke-MenuAction { Update-All } | Out-Null }
+      '10' { Invoke-MenuAction { Install-Cgpu } | Out-Null }
       '00' { Show-UpdateMenu }
       '88' { Invoke-MenuAction { Install-Shortcut } | Out-Null }
       '0' { $script:ExitMenu = $true }
@@ -1165,6 +1212,7 @@ inst v$InstVersion  跨平台开发环境 & AI Agents 安装器 (Windows)
   -Update         更新已安装的工具与 Agents
   -SelfUpdate     更新本脚本（快捷命令模式）
   -InstallShortcut 安装快捷命令 inst
+  -Cgpu           安装 cgpu 显卡实时监控命令 (cmd / PowerShell)
 
 选项:
   -AgentList LIST      $(($AgentTable | ForEach-Object { $_.Id }) -join ',') 或 all
@@ -1195,7 +1243,7 @@ function Invoke-InstMain {
   if ($AgentPackages) { $script:Agents = $true }
   if ($BaseUrl -or $AnthropicBaseUrl -or $OpenAiBaseUrl -or $Endpoint) { $script:DoEndpoint = $true } else { $script:DoEndpoint = $false }
   if ($All) { $script:Node = $true; $script:Python = $true; $script:Mirrors = $true; $script:Agents = $true }
-  $any = $Node -or $Python -or $Mirrors -or $Agents -or $Desktop -or $Check -or $Update -or $SelfUpdate -or $InstallShortcut -or $script:DoEndpoint
+  $any = $Node -or $Python -or $Mirrors -or $Agents -or $Desktop -or $Check -or $Update -or $SelfUpdate -or $InstallShortcut -or $Cgpu -or $script:DoEndpoint
   if ($Menu -or -not $any) {
     if ([Environment]::UserInteractive -and -not $env:INST_NO_TTY -and -not [Console]::IsInputRedirected) { Show-MainMenu; return }
     Show-Usage; $script:InstExitCode = 2; return
@@ -1204,6 +1252,7 @@ function Invoke-InstMain {
   if ($SelfUpdate) { Update-Installer; return }
   Write-Inst "检测到 Windows $([Environment]::OSVersion.Version) $Arch，PowerShell $($PSVersionTable.PSVersion)"
   if ($InstallShortcut) { Install-Shortcut }
+  if ($Cgpu) { Install-Cgpu }
   if ($script:DoEndpoint) { Set-AgentEndpoints }
   if ($Mirrors) { Set-Mirrors }
   if ($Node) { Install-Node }
