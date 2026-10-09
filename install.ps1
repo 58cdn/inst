@@ -65,6 +65,24 @@ function Resolve-InstBaseUrl([string]$Fallback) {
   Write-Host "[inst] no reachable mirror; using default $Fallback"
   return $Fallback
 }
+# A child installer cannot update the parent process; refresh the invoking PowerShell
+# after it exits, including the irm | iex entry point. Preserve custom process PATH entries.
+function Refresh-InstCallerEnvironment {
+  foreach ($name in @('NVM_HOME','NVM_SYMLINK','PYENV','PYENV_ROOT','PYENV_HOME')) {
+    $value = [Environment]::GetEnvironmentVariable($name, 'User')
+    if (-not $value) { $value = [Environment]::GetEnvironmentVariable($name, 'Machine') }
+    if ($value) { [Environment]::SetEnvironmentVariable($name, $value, 'Process') }
+  }
+  $parts = @($env:Path, [Environment]::GetEnvironmentVariable('Path','User'), [Environment]::GetEnvironmentVariable('Path','Machine'))
+  $unique = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  $paths = @()
+  foreach ($part in ($parts -join ';').Split(';')) {
+    if (-not $part.Trim()) { continue }
+    $expanded = [Environment]::ExpandEnvironmentVariables($part.Trim())
+    if ($unique.Add($expanded.TrimEnd('\'))) { $paths += $expanded }
+  }
+  $env:Path = ($paths -join ';')
+}
 if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
 & {
   param([object[]]$Forward, [string]$Self)
@@ -115,6 +133,11 @@ if ($env:INST_BOOTSTRAP_LIB_ONLY -eq '1') { return }
     foreach ($item in $Forward) { $childArgs += [string]$item }
     & $hostExe @childArgs
     $global:LASTEXITCODE = $LASTEXITCODE
+    $readOnly = @($Forward | Where-Object { $_ -in @('-Check','-Version','-Help','-DryRun') }).Count -gt 0
+    if ($global:LASTEXITCODE -eq 0 -and -not $readOnly) {
+      try { Refresh-InstCallerEnvironment }
+      catch { Write-Host "[inst] parent shell environment refresh failed: $_" -ForegroundColor Yellow }
+    }
   } catch {
     Write-Host "[inst] $_" -ForegroundColor Red
     $global:LASTEXITCODE = 1
