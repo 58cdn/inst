@@ -245,3 +245,30 @@ node tools/build-site.mjs && node tests/worker.test.mjs
 ```powershell
 ./tests/check-readonly.ps1; ./tests/python-version.ps1; ./tests/windows-regression.ps1; ./tests/cgpu.ps1
 ```
+
+### 下载失败与回退
+
+由 inst 自己发起的安装包、官方安装脚本、入口脚本和自更新下载采用以下边界：
+
+- **连接 / TLS**：Unix curl 单次连接最多 20 秒；Windows HttpClient 的连接阶段包含在下面的 30 秒预算中。
+- **响应头 / 首个有效文件数据**：每个候选源从请求开始共享 30 秒启动预算，重定向不重置预算（最多 5 次，禁止 HTTPS 降级）。HTTP 200、响应头或任意单字节不算下载开始；须收到并检查前 512 字节。小于 512 字节的文件必须在预算内完整结束并通过前缀检查。HTTP 错误、空文件和 HTML/JSON 错误页直接失败；已知脚本（包括小于 512 字节但以 `@echo off` 开始的 CMD）、ZIP/MSIX、EXE 另检查格式前缀。前缀检查不是签名或完整性证明。
+- **下载中无进度**：开始后连续约 120 秒没有新文件数据则失败；Unix 以一秒采样观察文件增长，Windows 每次异步读取独立计时。
+- **整体时限**：大文件没有总时限，持续下载可超过 30 秒。Ctrl+C/终止会取消请求并清理部分文件。CMD 最外层只获取一个很小的 PowerShell 引导脚本，使用 .NET HttpClient（不依赖 curl.exe）并设每个候选 30 秒整体上限；不影响后续大文件。
+
+每个候选只尝试一次，自动映射最多两个源：本项目官网与 `58cdn/inst` GitHub master 的相同入口路径；Miniconda 官方目录与清华 TUNA 的相同文件名。已有节点测速选择继续保留；清单中其他选中节点失败后最多再进入这两个内置源。`INST_RAW_BASE_URL` 显式覆盖及 `INST_MIRROR_AUTO=0` 保留入口单源行为；自动选址通过内部 `INST_SELECTED_BASE_URL` 传给主脚本，不会冒充用户显式覆盖而禁用自更新回退；自定义 URL、代理、含查询参数的 URL 不会自动改写；URL 内凭据被拒绝。错误记录保留候选序号和失败原因。
+
+Miniconda 安装前从[Anaconda 官方目录](https://repo.anaconda.com/miniconda/)取得对应架构文件的 SHA256，两站必须匹配同一摘要（包括 `latest`），镜像未同步则失败后切换。无法取得官方摘要时停止安装，不降低校验要求。清华镜像的覆盖及维护方见 [TUNA 官方说明](https://mirrors.tuna.tsinghua.edu.cn/help/anaconda/)。不添加通用 GitHub 代理，不向其他站点发送自定义地址或凭据。下载成功并校验后才替换目标文件；Windows 已有文件通过同卷 `File.Replace` 替换，目标锁定导致替换失败时保留旧文件；失败保留已有目标，删除此次临时文件。系统安装器原有签名检查继续由系统执行。官方 PowerShell 脚本保留原始下载字节，严格 UTF-8 解码及语法检查后另生成带 BOM 的临时执行副本，兼容 PowerShell 5.1 的中文脚本。
+
+范围说明：nvm、pyenv、npm/pip、包管理器以及第三方官方安装脚本内部的网络请求由它们自行管理，inst 不接管其超时，也不读取或转发 `NVM_AUTH_HEADER`；版本索引、区域探测等小型元数据仍使用各自的短总超时。本项目入口跟随发布通道，官网与 master 可能存在部署时间差；不将这类入口当成不可变版本资源。
+
+下载实现维护在 `scripts/lib/download.sh`、`scripts/lib/download.ps1`，通过 `node tools/embed-download.mjs` 嵌入各独立入口，避免安装快捷命令后依赖旁侧文件。修改后运行：
+
+```sh
+node tools/embed-download.mjs --check
+python3 tests/download-regression.py
+bash tests/unix-regression.sh
+node tools/build-site.mjs
+node tests/worker.test.mjs
+```
+
+Windows 使用 `powershell -NoProfile -File tests/download-regression.ps1`，并运行 `.github/workflows/checks.yml` 中其他 Windows 回归。网络回归使用 Python 标准库 HTTPS 服务与临时 CA（仅设置该测试 curl 的 CA 文件），不修改系统信任；PowerShell 使用受控 HttpMessageHandler 测试异步超时和流读取。

@@ -20,6 +20,8 @@ jobs:
           if command -v zsh >/dev/null; then zsh -n install.zsh; fi
           bash -n scripts/install-unix.sh
           node --check tools/update-versions.mjs
+          node tools/embed-download.mjs --check
+          python3 tests/download-regression.py
           bash tests/unix-regression.sh
       - name: Site build and Worker routing
         run: |
@@ -32,14 +34,17 @@ jobs:
       - name: Windows PowerShell checks
         shell: powershell
         run: |
+          ./tests/download-regression.ps1
           ./tests/check-readonly.ps1
           ./tests/node-version.ps1
           ./tests/python-version.ps1
           ./tests/windows-regression.ps1
           ./tests/cgpu.ps1
-      - name: PowerShell 7 parse check
+      - name: PowerShell 7 download and parse checks
         shell: pwsh
-        run: ./tests/check-readonly.ps1
+        run: |
+          ./tests/download-regression.ps1
+          ./tests/check-readonly.ps1
   # https://inst.linux.yun (Cloudflare Workers, see wrangler.jsonc). Runs only after every
   # check passed on the default branch. Needs the repository secrets CLOUDFLARE_API_TOKEN
   # ("Edit Cloudflare Workers" template) and CLOUDFLARE_ACCOUNT_ID; without them it only

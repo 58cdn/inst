@@ -27,7 +27,7 @@ function Get-Default([string]$Value, [string]$EnvName, [string]$Fallback) {
   if ($fromEnv) { return $fromEnv }
   return $Fallback
 }
-$InstBase = Get-Default '' 'INST_RAW_BASE_URL' 'https://inst.linux.yun'
+$InstBase = Get-Default '' 'INST_RAW_BASE_URL' (Get-Default '' 'INST_SELECTED_BASE_URL' 'https://inst.linux.yun')
 $Prefix = Get-Default $Prefix 'INST_PREFIX' (Join-Path $env:LOCALAPPDATA 'inst')
 $PythonVersion = Get-Default $PythonVersion 'INST_PYTHON_VERSION' 'latest'
 $Region = Get-Default $Region 'INST_REGION' 'auto'
@@ -200,28 +200,162 @@ function Resolve-GhUrl([string]$Url) {
   return $Url
 }
 
+# BEGIN GENERATED DOWNLOAD
+# Embedded into standalone entry points by tools/embed-download.mjs.
+function Test-InstDownloadPrefix([string]$Url, [byte[]]$Bytes, [int]$Count, [string]$ContentType) {
+  $text = [Text.Encoding]::UTF8.GetString($Bytes, 0, [Math]::Min($Count, 512))
+  if ($ContentType -match '(?i)text/html|application/(json|problem\+json)' -or $text -match '(?i)<(!doctype\s+html|html|head|body)[\s>]') { throw 'unexpected error document' }
+  $path = ([Uri]$Url).AbsolutePath
+  if ($path -match '\.(zip|msix)$' -and ($Count -lt 4 -or [BitConverter]::ToString($Bytes,0,4) -ne '50-4B-03-04')) { throw 'invalid ZIP prefix' }
+  if ($path -match '\.exe$' -and ($Count -lt 2 -or $Bytes[0] -ne 77 -or $Bytes[1] -ne 90)) { throw 'invalid EXE prefix' }
+  if ($path -match '\.sh$' -and -not $text.StartsWith('#!')) { throw 'invalid script prefix' }
+  if ($path -notmatch '\.(zip|msix|exe|sh|ps1|asc|cmd)$' -and $Count -lt 512) { throw 'unrecognized short response' }
+  if ($path -match '\.cmd$' -and $text.TrimStart([char]0xFEFF) -notmatch '\A(?i:@echo[ \t]+off)(?:\r?\n|$)') { throw 'invalid CMD prefix' }
+  if ($path -match '\.ps1$' -and -not $text.TrimStart([char]0xFEFF).StartsWith('#')) { throw 'invalid PowerShell prefix' }
+}
+function Wait-InstDownloadTask($Task, $Cancellation) {
+  # Polling yields to PowerShell so Ctrl+C enters the caller's finally block.
+  while (-not $Task.IsCompleted) { $Cancellation.Token.ThrowIfCancellationRequested(); Start-Sleep -Milliseconds 50 }
+  return $Task.GetAwaiter().GetResult()
+}
+function New-InstDownloadClient {
+  $handler = New-Object Net.Http.HttpClientHandler
+  $handler.AllowAutoRedirect = $false
+  $handler.UseCookies = $false
+  return New-Object Net.Http.HttpClient($handler)
+}
+function Save-InstDownloadAttempt([string]$Url, [string]$OutFile, [string]$Sha256 = '', [int]$StartSeconds = 30, [int]$IdleSeconds = 120) {
+  Add-Type -AssemblyName System.Net.Http
+  $OutFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile)
+  $uri = [Uri]$Url
+  if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'public HTTPS URL required' }
+  $client = New-InstDownloadClient
+  $client.Timeout = [Threading.Timeout]::InfiniteTimeSpan
+  $cts = New-Object Threading.CancellationTokenSource
+  $cts.CancelAfter([TimeSpan]::FromSeconds($StartSeconds))
+  $temp = $OutFile + '.part.' + [Guid]::NewGuid().ToString('N')
+  $response = $null; $stream = $null; $file = $null
+  try {
+    for ($redirect = 0; $redirect -le 5; $redirect++) {
+      $request = New-Object Net.Http.HttpRequestMessage([Net.Http.HttpMethod]::Get, $uri)
+      try { $response = Wait-InstDownloadTask ($client.SendAsync($request, [Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cts.Token)) $cts }
+      finally { $request.Dispose() }
+      $status = [int]$response.StatusCode
+      if ($status -in @(301,302,303,307,308)) {
+        if ($redirect -eq 5 -or -not $response.Headers.Location) { throw 'redirect limit or missing location' }
+        $uri = New-Object Uri($uri, $response.Headers.Location)
+        if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'unsafe redirect' }
+        $response.Dispose(); $response = $null
+        continue
+      }
+      if ($status -ne 200) { throw "HTTP $status" }
+      break
+    }
+    $stream = Wait-InstDownloadTask ($response.Content.ReadAsStreamAsync()) $cts
+    $file = [IO.File]::Open($temp, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $buffer = New-Object byte[] 65536
+    $prefix = New-Object byte[] 512
+    $prefixCount = 0; $total = [long]0; $started = $false
+    while ($true) {
+      $count = Wait-InstDownloadTask ($stream.ReadAsync($buffer,0,$buffer.Length,$cts.Token)) $cts
+      if ($cts.IsCancellationRequested) { throw 'download deadline exceeded' }
+      if ($count -eq 0) { break }
+      $copy = [Math]::Min(512 - $prefixCount, $count)
+      if ($copy -gt 0) { [Array]::Copy($buffer,0,$prefix,$prefixCount,$copy); $prefixCount += $copy }
+      $file.Write($buffer,0,$count); $total += $count
+      if (-not $started -and $prefixCount -eq 512) {
+        Test-InstDownloadPrefix $Url $prefix $prefixCount ([string]$response.Content.Headers.ContentType)
+        $started = $true
+      }
+      if ($started) { $cts.CancelAfter([TimeSpan]::FromSeconds($IdleSeconds)) }
+    }
+    if ($total -eq 0) { throw 'empty response' }
+    Test-InstDownloadPrefix $Url $prefix $prefixCount ([string]$response.Content.Headers.ContentType)
+    if ($null -ne $response.Content.Headers.ContentLength -and $total -ne $response.Content.Headers.ContentLength) { throw 'incomplete response' }
+    $file.Dispose(); $file = $null
+    if ($Sha256 -and (Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash -ne $Sha256) { throw 'SHA256 mismatch' }
+    if ([IO.File]::Exists($OutFile)) { [IO.File]::Replace($temp, $OutFile, [System.Management.Automation.Language.NullString]::Value) }
+    else { [IO.File]::Move($temp, $OutFile) }
+  } catch [OperationCanceledException] {
+    throw 'download start/no-progress deadline exceeded'
+  } finally {
+    $cts.Cancel()
+    if ($file) { $file.Dispose() }
+    if ($stream) { $stream.Dispose() }
+    if ($response) { $response.Dispose() }
+    $client.Dispose(); $cts.Dispose()
+    if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force }
+  }
+}
+function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
+  $Url
+  $official = 'https://inst.linux.yun/'
+  $github = 'https://raw.githubusercontent.com/58cdn/inst/master/'
+  foreach ($path in @('scripts/install-unix.sh','scripts/install-windows.ps1','install.sh','install.ps1')) {
+    if ($env:INST_RAW_BASE_URL -or $env:INST_MIRROR_AUTO -eq '0') { continue }
+    if ($Url -ceq ($official + $path)) { $github + $path }
+    if ($Url -ceq ($github + $path)) { $official + $path }
+  }
+  if ($Sha256 -and $Url -cmatch '^https://(repo\.anaconda\.com/miniconda|mirrors\.tuna\.tsinghua\.edu\.cn/anaconda/miniconda)/(Miniconda3-[a-zA-Z0-9._-]+)$') {
+    $name = $Matches[2]
+    foreach ($base in @('https://repo.anaconda.com/miniconda/','https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/')) {
+      if (($base + $name) -cne $Url) { $base + $name }
+    }
+  }
+}
+function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '', $ResolvedUrl = $null) {
+  # Optional [ref] output; a typed [ref] default rejects omitted arguments in PS5.1.
+  if ($null -ne $ResolvedUrl -and $ResolvedUrl -isnot [System.Management.Automation.PSReference]) { throw 'ResolvedUrl must be a reference' }
+  $failures = @(); $index = 0
+  foreach ($candidate in (Get-InstDownloadCandidates $Url $Sha256)) {
+    $index++
+    try {
+      Save-InstDownloadAttempt $candidate $OutFile $Sha256
+      if ($ResolvedUrl) { $ResolvedUrl.Value = $candidate }
+      return
+    }
+    catch [Management.Automation.PipelineStoppedException] { throw }
+    catch {
+      $reason = "candidate ${index}: $($_.Exception.Message)"
+      $failures += $reason
+      Write-Warning $reason
+    }
+  }
+  throw ('download candidates exhausted: ' + ($failures -join '; '))
+}
+# END GENERATED DOWNLOAD
+
 # ---------------------------------------------------------------- 下载
-function Save-Download([string]$Url, [string]$OutFile) {
+function Save-Download([string]$Url, [string]$OutFile, [string]$Sha256 = '') {
   Assert-HttpsUrl $Url '下载地址'
   if ($DryRun) { Write-Plan "下载 $Url -> $OutFile"; return }
   $dir = Split-Path -Parent $OutFile
   if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
   Write-Inst "下载 $Url"
-  $curl = Get-Command curl.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($curl) {
-    & $curl.Source --proto '=https' --proto-redir '=https' -fL --retry 2 --connect-timeout 20 -o $OutFile $Url
-    if ($LASTEXITCODE -ne 0) { Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue; throw "下载失败 ($LASTEXITCODE): $Url" }
-  } else {
-    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile
-  }
+  Save-InstDownload $Url $OutFile $Sha256
+
 }
 function Invoke-OfficialPs1([string]$Url, [string[]]$ScriptArgs = @()) {
   Assert-HttpsUrl $Url '官方安装脚本'
   if ($DryRun) { Write-Plan "下载并执行 $Url $($ScriptArgs -join ' ')"; return }
   # 在子进程中执行，避免官方脚本的 exit 关闭当前窗口。参数只来自内置表，不含用户输入。
-  $command = "`$ProgressPreference='SilentlyContinue'; [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; & ([scriptblock]::Create((Invoke-RestMethod -UseBasicParsing '$Url'))) $($ScriptArgs -join ' ')"
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $command
-  if ($LASTEXITCODE -ne 0) { throw "官方安装脚本失败 ($LASTEXITCODE): $Url" }
+  $temp = Join-Path ([IO.Path]::GetTempPath()) ('inst-official-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+  $executionFile = $temp + '.exec.ps1'
+  try {
+    Save-InstDownload $Url $temp
+    # Keep downloaded bytes intact; Windows PowerShell 5.1 needs a BOM for UTF-8 -File.
+    $utf8 = New-Object Text.UTF8Encoding($false, $true)
+    $code = $utf8.GetString([IO.File]::ReadAllBytes($temp)).TrimStart([char]0xFEFF)
+    $tokens = $null; $errors = $null
+    [Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$errors) | Out-Null
+    if ($errors.Count) { throw 'official installer syntax validation failed' }
+    [IO.File]::WriteAllText($executionFile, $code, (New-Object Text.UTF8Encoding $true))
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $executionFile @ScriptArgs
+    if ($LASTEXITCODE -ne 0) { throw "official installer failed ($LASTEXITCODE)" }
+  } finally {
+    Remove-Item -LiteralPath $temp, $executionFile -Force -ErrorAction SilentlyContinue
+  }
+
   Refresh-ProcessEnvironment
 }
 
@@ -542,7 +676,14 @@ function Install-Miniconda {
     $file = "Miniconda3-latest-Windows-$condaArch.exe"
     $site = if ((Get-InstRegion) -eq 'cn') { (Get-PresetConda $(if ($MirrorPreset) { $MirrorPreset } else { 'tuna' })) + '/miniconda' } else { 'https://repo.anaconda.com/miniconda' }
     $installer = Join-Path $Prefix $file
-    Save-Download "$site/$file" $installer
+    $digest = ''
+    if (-not $DryRun) {
+      $index = (Invoke-WebRequest -UseBasicParsing -Uri 'https://repo.anaconda.com/miniconda/' -TimeoutSec 30 -MaximumRedirection 0).Content
+      $row = [regex]::Match($index, '(?s)<tr>\s*<td>\s*<a href="' + [regex]::Escape($file) + '".*?</tr>')
+      $digest = [regex]::Match($row.Value, '[0-9a-f]{64}').Value
+      if (-not $digest) { throw 'Miniconda official SHA256 unavailable' }
+    }
+    Save-Download "$site/$file" $installer $digest
     # /D 必须是最后一个参数且不能加引号，因此整体作为一个字符串传递。
     Invoke-CheckedProcess $installer "/InstallationType=JustMe /RegisterPython=0 /AddToPath=0 /S /D=$condaRoot" "安装 Miniconda 到 $condaRoot"
     if (-not $DryRun) {
@@ -958,7 +1099,11 @@ function Get-ScriptVersion([string]$Code) {
 }
 function Get-RemoteScript {
   Assert-HttpsUrl $InstBase 'INST_RAW_BASE_URL'
-  $bytes = (New-Object Net.WebClient).DownloadData("$InstBase/scripts/install-windows.ps1")
+  $temp = Join-Path ([IO.Path]::GetTempPath()) ('inst-update-' + [Guid]::NewGuid().ToString('N') + '.ps1')
+  try {
+    Save-InstDownload "$InstBase/scripts/install-windows.ps1" $temp
+    $bytes = [IO.File]::ReadAllBytes($temp)
+  } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
   $code = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
   $tokens = $null; $errors = $null
   [Management.Automation.Language.Parser]::ParseInput($code, [ref]$tokens, [ref]$errors) | Out-Null

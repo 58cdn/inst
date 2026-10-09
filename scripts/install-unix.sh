@@ -9,7 +9,7 @@ DRY_RUN=0; ASSUME_YES=0; INTERACTIVE=0; QUIET=0
 DO_NODE=0; DO_PYTHON=0; DO_MIRRORS=0; DO_AGENTS=0; DO_DESKTOP=0; DO_ENDPOINT=0
 DO_CHECK=0; DO_UPDATE=0; DO_SELF_UPDATE=0; DO_SHORTCUT=0; DO_MENU=0
 APPLY_SYSTEM_MIRROR=0; WITH_BUILD_DEPS=0
-BASE_URL="${INST_RAW_BASE_URL:-https://inst.linux.yun}"
+BASE_URL="${INST_RAW_BASE_URL:-${INST_SELECTED_BASE_URL:-https://inst.linux.yun}}"
 PREFIX="${INST_PREFIX:-$HOME/.local/inst}"
 ENV_DIR="${INST_ENV_DIR:-$HOME/.config/inst}"
 ENV_FILE="$ENV_DIR/env.sh"
@@ -203,12 +203,123 @@ gh_url(){
   printf '%s' "$1"
 }
 
+# BEGIN GENERATED DOWNLOAD
+# Embedded into standalone entry points by tools/embed-download.mjs.
+# Arguments: URL destination [expected SHA256] [start seconds] [idle seconds].
+inst_download_attempt() (
+  url=$1 out=$2 expected=${3:-} start=${4:-30} idle=${5:-120}
+  case "$url" in https://*@*) echo 'download: credentials in URL not supported' >&2; exit 2;; https://*) ;; *) echo 'download: HTTPS required' >&2; exit 2;; esac
+  dir=$(mktemp -d "${out}.part.XXXXXX") || exit 1
+  pid='' deadline=''
+  cleanup() {
+    [ -z "$pid" ] || { kill "$pid" 2>/dev/null || :; wait "$pid" 2>/dev/null || :; }
+    [ -z "$deadline" ] || { kill "$deadline" 2>/dev/null || :; wait "$deadline" 2>/dev/null || :; }
+    rm -rf "$dir"
+  }
+  trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  # One deadline across DNS, connect, TLS, all redirects, headers and prefix.
+  sleep "$start" & deadline=$!
+  curl --proto '=https' --proto-redir '=https' -fsSL --retry 0 \
+    --connect-timeout 20 --max-redirs 5 --no-buffer \
+    -D "$dir/headers" "$url" -o "$dir/body" & pid=$!
+  started=0 previous=0 quiet=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$started" -eq 0 ] && ! kill -0 "$deadline" 2>/dev/null; then
+      echo 'download: start deadline exceeded' >&2; exit 28
+    fi
+    size=0
+    [ ! -f "$dir/body" ] || size=$(wc -c < "$dir/body" | tr -d ' ')
+    if [ "$started" -eq 0 ] && [ "$size" -ge 512 ]; then
+      inst_download_prefix "$url" "$dir/body" "$dir/headers" || exit 65
+      started=1
+      kill "$deadline" 2>/dev/null || :; wait "$deadline" 2>/dev/null || :; deadline=''
+    fi
+    if [ "$started" -eq 1 ]; then
+      if [ "$size" -gt "$previous" ]; then quiet=0; else quiet=$((quiet + 1)); fi
+      if [ "$quiet" -ge "$idle" ]; then echo 'download: no progress deadline exceeded' >&2; exit 28; fi
+    fi
+    previous=$size
+    sleep 1
+  done
+  rc=0; wait "$pid" || rc=$?; pid=''
+  [ "$rc" -eq 0 ] || { echo "download: transport failed ($rc)" >&2; exit "$rc"; }
+  if [ "$started" -eq 0 ] && ! kill -0 "$deadline" 2>/dev/null; then echo 'download: start deadline exceeded' >&2; exit 28; fi
+  [ -s "$dir/body" ] || { echo 'download: empty response' >&2; exit 65; }
+  inst_download_prefix "$url" "$dir/body" "$dir/headers" || exit 65
+  if [ -n "$expected" ]; then
+    if command -v sha256sum >/dev/null 2>&1; then actual=$(sha256sum "$dir/body"); else actual=$(shasum -a 256 "$dir/body"); fi
+    [ "${actual%% *}" = "$expected" ] || { echo 'download: SHA256 mismatch' >&2; exit 65; }
+  fi
+  mv -f "$dir/body" "$out"
+)
+inst_download_prefix() {
+  http_status=$(awk '/^HTTP\// { code=$2 } END { print code }' "$3")
+  [ "$http_status" = 200 ] || { echo "download: HTTP ${http_status:-missing status}" >&2; return 1; }
+  # Reject error pages even when a server incorrectly returns 200/octet-stream.
+  if awk '/^HTTP\// { type="" } tolower($0) ~ /^content-type:/ { type=$0 } END { print type }' "$3" | grep -Eiq '^content-type:.*(text/html|application/(json|problem\+json))' \
+    || head -c 512 "$2" | LC_ALL=C grep -Eiq '<(!doctype[[:space:]]+html|html|head|body)([[:space:]>])'; then
+    echo 'download: unexpected error document' >&2; return 1
+  fi
+  magic=$(od -An -tx1 -N4 "$2" | tr -d ' \n')
+  case "${1%%\?*}" in
+    *.zip|*.msix) case "$magic" in 504b0304*) ;; *) echo 'download: invalid ZIP prefix' >&2; return 1;; esac;;
+    *.exe) case "$magic" in 4d5a*) ;; *) echo 'download: invalid EXE prefix' >&2; return 1;; esac;;
+    *.sh) case "$magic" in 2321*) ;; *) echo 'download: invalid script prefix' >&2; return 1;; esac;;
+    *.asc) head -c 512 "$2" | grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----' || { echo 'download: invalid PGP prefix' >&2; return 1; };;
+    *.ps1) case "$magic" in 23*|efbbbf23*) ;; *) echo 'download: invalid PowerShell prefix' >&2; return 1;; esac;;
+    *) [ "$(wc -c < "$2" | tr -d ' ')" -ge 512 ] || { echo 'download: unrecognized short response' >&2; return 1; };;
+  esac
+}
+inst_download_candidates() {
+  printf '%s\n' "$1"
+  # Exact public paths only: never mirror queries, credentials, custom hosts or proxies.
+  case "$1" in
+    https://inst.linux.yun/scripts/install-unix.sh|https://inst.linux.yun/scripts/install-windows.ps1|https://inst.linux.yun/install.sh|https://inst.linux.yun/install.ps1)
+      [ -z "${INST_RAW_BASE_URL:-}" ] && [ "${INST_MIRROR_AUTO:-1}" != 0 ] || return 0
+      printf 'https://raw.githubusercontent.com/58cdn/inst/master/%s\n' "${1#https://inst.linux.yun/}";;
+    https://raw.githubusercontent.com/58cdn/inst/master/scripts/install-unix.sh|https://raw.githubusercontent.com/58cdn/inst/master/scripts/install-windows.ps1|https://raw.githubusercontent.com/58cdn/inst/master/install.sh|https://raw.githubusercontent.com/58cdn/inst/master/install.ps1)
+      [ -z "${INST_RAW_BASE_URL:-}" ] && [ "${INST_MIRROR_AUTO:-1}" != 0 ] || return 0
+      printf 'https://inst.linux.yun/%s\n' "${1#https://raw.githubusercontent.com/58cdn/inst/master/}";;
+  esac
+  # Miniconda mutable aliases are only portable with a pinned digest.
+  if [ -n "${2:-}" ]; then
+    case "$1" in
+      https://repo.anaconda.com/miniconda/Miniconda3-*) suffix=${1#https://repo.anaconda.com/miniconda/};;
+      https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/Miniconda3-*) suffix=${1#https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda/};;
+      *) return 0;;
+    esac
+    case "$suffix" in *[!a-zA-Z0-9._-]*) return 0;; esac
+    for base in https://repo.anaconda.com/miniconda https://mirrors.tuna.tsinghua.edu.cn/anaconda/miniconda; do
+      [ "$base/$suffix" = "$1" ] || printf '%s/%s\n' "$base" "$suffix"
+    done
+  fi
+}
+inst_download() (
+  rc=1 index=0
+  candidates=$(inst_download_candidates "$1" "${3:-}")
+  while IFS= read -r candidate; do
+    index=$((index + 1))
+    if inst_download_attempt "$candidate" "$2" "${3:-}"; then
+      [ -z "${4:-}" ] || printf '%s' "$candidate" > "$4"
+      exit 0
+    else rc=$?; fi
+    echo "download: attempt failed ($rc); candidate $index" >&2
+    case "$rc" in 130|143) exit "$rc";; esac
+  done <<EOF_CANDIDATES
+$candidates
+EOF_CANDIDATES
+  echo 'download: candidates exhausted' >&2
+  exit "$rc"
+)
+# END GENERATED DOWNLOAD
+
 # ---------------------------------------------------------------- 下载
 download(){
   local url="$1" out="$2"
-  local -a opts=(--proto '=https' --proto-redir '=https' -fL --retry 2 --connect-timeout 20)
-  if [[ -t 2 ]] && ((!QUIET)); then opts+=(-#); else opts+=(-sS); fi
-  run curl "${opts[@]}" "$url" -o "$out"
+  if ((DRY_RUN)); then printf '+ download %q -> %q\n' "$url" "$out"; return 0; fi
+  inst_download "$url" "$out" "${3:-}"
 }
 # 下载到临时文件再执行，避免执行半截脚本。
 official_script(){
@@ -217,7 +328,7 @@ official_script(){
   need curl || return 1
   local script_file rc=0
   script_file="$(mktemp)"
-  curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 --connect-timeout 20 "$url" -o "$script_file" || rc=$?
+  inst_download "$url" "$script_file" || rc=$?
   if ((rc == 0)); then bash "$script_file" "$@" < /dev/null || rc=$?; fi
   rm -f "$script_file"
   return "$rc"
@@ -400,7 +511,13 @@ install_miniconda(){
     [[ "$REGION" == cn ]] && site="$(preset_conda "${MIRROR_PRESET:-tuna}")/miniconda"
     local installer="$PREFIX/$file"
     run mkdir -p "$PREFIX"
-    download "$site/$file" "$installer"
+    local digest=''
+    if ((!DRY_RUN)); then
+      digest=$(curl --proto '=https' --proto-redir '=https' -fsSL --max-time 30 --max-redirs 5 https://repo.anaconda.com/miniconda/ \
+        | tr '\n' ' ' | sed 's@</tr>@\n@g' | grep -F ""$file"" | grep -Eo '[0-9a-f]{64}' | head -n 1) || return 1
+      [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { err 'Miniconda 官方 SHA256 不可用'; return 1; }
+    fi
+    download "$site/$file" "$installer" "$digest"
     run bash "$installer" -b -p "$conda_root"
     run rm -f "$installer"
     if ((!DRY_RUN)) && [[ ! -x "$conda_root/bin/conda" ]]; then err "Miniconda 安装后未找到 conda: $conda_root"; return 1; fi
@@ -722,7 +839,18 @@ install_claude_apt(){
   local key=/etc/apt/keyrings/claude-desktop.asc
   as_root install -d -m 755 /etc/apt/keyrings
   if ((DRY_RUN)); then printf '+ curl %q -o %q\n' "$CLAUDE_APT_KEY" "$key"
-  else curl --proto '=https' --proto-redir '=https' -fsSL "$CLAUDE_APT_KEY" | as_root tee "$key" >/dev/null; fi
+  else
+    local key_tmp key_rc=0
+    key_tmp=$(mktemp)
+    inst_download "$CLAUDE_APT_KEY" "$key_tmp" || key_rc=$?
+    if ((key_rc == 0)); then
+      if ! grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----' "$key_tmp" || ! grep -q '^-----END PGP PUBLIC KEY BLOCK-----' "$key_tmp"; then
+        err '无效的 apt 公钥'; key_rc=65
+      else as_root install -m 644 "$key_tmp" "$key" || key_rc=$?; fi
+    fi
+    rm -f "$key_tmp"
+    ((key_rc == 0)) || return "$key_rc"
+  fi
   printf 'deb [signed-by=%s] %s stable main\n' "$key" "$CLAUDE_APT_REPO" \
     | { if ((DRY_RUN)); then cat; else as_root tee /etc/apt/sources.list.d/claude-desktop.list >/dev/null; fi; }
   as_root apt-get update
@@ -970,7 +1098,7 @@ self_update(){
   fi
   # 与 kejilion.sh 相同的防护：先下载到临时文件，校验非空、shebang、版本号与语法后再替换，并保留备份。
   local tmp; tmp="$(mktemp "${target}.tmp.XXXXXX")"
-  if ! curl --proto '=https' --proto-redir '=https' -fsSL --retry 2 "$BASE_URL/scripts/install-unix.sh" -o "$tmp" \
+  if ! inst_download "$BASE_URL/scripts/install-unix.sh" "$tmp" \
     || [[ ! -s "$tmp" || "$(head -c 2 "$tmp")" != '#!' || -z "$(script_version "$tmp")" ]] || ! bash -n "$tmp"; then
     rm -f "$tmp"; err '下载或校验失败，未替换'; return 1
   fi
@@ -985,7 +1113,7 @@ install_shortcut(){
   if ((DRY_RUN)); then log "将复制脚本到 $SHORTCUT_PATH"; return 0; fi
   mkdir -p "$BIN_DIR"
   if [[ -n "$SCRIPT_PATH" && "$SCRIPT_PATH" != "$SHORTCUT_PATH" ]]; then cp "$SCRIPT_PATH" "$SHORTCUT_PATH"
-  elif [[ ! -f "$SHORTCUT_PATH" ]]; then curl --proto '=https' -fsSL "$BASE_URL/scripts/install-unix.sh" -o "$SHORTCUT_PATH"; fi
+  elif [[ ! -f "$SHORTCUT_PATH" ]]; then inst_download "$BASE_URL/scripts/install-unix.sh" "$SHORTCUT_PATH"; fi
   chmod +x "$SHORTCUT_PATH"
   env_path localbin "$BIN_DIR"
   ok "已安装 ${SHORTCUT_PATH}，新终端中输入 $SHORTCUT_NAME 即可打开菜单"
