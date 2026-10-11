@@ -57,6 +57,7 @@ $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; 
  8  环境检查
  9  更新已安装工具
  10  cgpu 显卡监控     Windows CMD / PowerShell，1 秒刷新 nvidia-smi
+ 11  Windows 系统管理  安装 winmanage：更新 / Defender 状态、预演、备份恢复
  00 脚本更新         立即更新 / 开启或关闭每日自动更新
  88 安装快捷命令
  0  退出
@@ -160,6 +161,12 @@ cgpu -Once        # 仅查看一次
 ```
 
 依赖 NVIDIA 显卡驱动提供的 `nvidia-smi`；未安装驱动或找不到命令时给出错误。CMD 包装器优先使用 PowerShell 7，未找到则使用 Windows PowerShell 5.1。
+
+### 10. Windows 系统管理
+
+菜单 **11** 或 `inst -WindowsManagement` 安装 `winmanage`（CMD / PowerShell 5.1 / 7）。默认只读查询；自动更新策略、Defender 实时保护切换与原值恢复均需显式操作、`-Apply` 和新备份路径。`-DryRun` 永远不修改。受管策略、权限不足、篡改防护或不支持版本会阻止修改。不会永久禁更、卸载内置 Defender 或隐藏安全中心。
+
+用法、恢复步骤、适用边界和微软官方依据见 [Windows 系统管理说明](scripts/winmanage.md)。
 
 ## 常用参数
 
