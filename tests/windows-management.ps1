@@ -51,7 +51,7 @@ try {
   Reject { Invoke-WmAction -Action Bad } '未知'
   Reject { Invoke-WmAction -Action DefenderUninstall -Apply } '不支持'
   Reject { Invoke-WmAction -Action SecurityCenterDisable -Apply } '不支持'
-  foreach ($case in @(@('Admin',$false,'管理员'),@('Managed',$true,'组织'),@('Edition','Core','白名单'),@('ProductType',3,'Server'),@('Build',9600,'旧版'),@('OSVersion','12.0.0','旧版'))) {
+  foreach ($case in @(@('Machine','','本机标识'),@('Admin',$false,'管理员'),@('Managed',$true,'组织'),@('Edition','Core','白名单'),@('ProductType',3,'Server'),@('Build',9600,'旧版'),@('OSVersion','12.0.0','旧版'))) {
     Reset-State; $script:state.($case[0])=$case[1]
     Reject { Invoke-WmAction -Action UpdateDisable -Apply -BackupPath (Join-Path $temp 'blocked.json') } $case[2]
   }

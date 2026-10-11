@@ -77,6 +77,7 @@ function Get-WmState {
 }
 
 function Assert-WmAllowed($State, [string]$Target) {
+  if (-not $State.Machine -or $State.Machine -isnot [string]) { throw '无法确定本机标识；不能创建可恢复的备份。' }
   if ($State.ProductType -ne 1 -or $State.Build -lt 10240 -or $State.OSVersion -notmatch '^10\.0\.') { throw '仅支持 Windows 10/11 客户端；Server/旧版不支持。' }
   if (-not [Environment]::Is64BitProcess -and [Environment]::Is64BitOperatingSystem) { throw '请使用 64 位 PowerShell。' }
   if (-not $State.Admin) { throw '需要管理员 PowerShell；不会自动提权。' }
