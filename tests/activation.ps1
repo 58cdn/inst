@@ -76,6 +76,8 @@ if ([Environment]::OSVersion.Platform -eq 'Win32NT') {
   $beforePath=[Environment]::GetEnvironmentVariable('Path','User')
   $output=& $engine -NoProfile -File (Join-Path $root 'install.ps1') -Activation -DryRun 2>&1 | Out-String
   Assert ($LASTEXITCODE -eq 0 -and $output -match 'activation.ps1' -and $output -match 'activation.cmd' -and $output -match 'activation.md') 'Installer forwarding'
+  $output=& $engine -NoProfile -File (Join-Path $root 'install.ps1') -WindowsManagement -Activation -DryRun 2>&1 | Out-String
+  Assert ($LASTEXITCODE -eq 0 -and $output -match 'activation.ps1' -and $output -match 'winmanage.ps1') 'Combined installer forwarding'
   Assert ([Environment]::GetEnvironmentVariable('Path','User') -ceq $beforePath) 'DryRun changed PATH'
   $output=& cmd.exe /d /c ('"{0}" -Action MasReference -Open -DryRun' -f (Join-Path $root 'scripts/activation.cmd')) 2>&1 | Out-String
   Assert ($LASTEXITCODE -eq 0 -and $output -match 'Preview' -and $output -match 'github.com/massgravel') 'CMD forwarding'

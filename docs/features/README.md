@@ -8,8 +8,8 @@
 | 网络与镜像 | 3 | [系统和开发工具镜像](mirrors.md) |
 | AI 工具 | 4、5、6 | [CLI、桌面端与地址配置](agents.md) |
 | 常用工具 | 8；Windows 10 | [环境检查与显卡监控](tools.md) |
-| 系统激活 | Windows 12 | [只读状态、微软入口、第三方项目参考](activation.md) |
+| 系统激活 | Windows 菜单 12 | [只读状态、微软入口、第三方项目参考](activation.md) |
 | 组合安装与 inst 维护 | 7、9、00、88 | [组合安装、更新与快捷命令](maintenance.md) |
-| 系统管理 | 暂无已发布入口 | [独立规划与 PR #8](system.md) |
+| 系统管理 | Windows 菜单 11 | [更新策略、Defender 与恢复](system.md) |
 
 [架构与兼容规划](../architecture.md)。没有新增自动执行激活、安全防护或更新策略变更的组合动作。

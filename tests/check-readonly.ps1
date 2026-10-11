@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-foreach ($file in @('install.ps1', 'scripts\install-windows.ps1', 'scripts\cgpu.ps1', 'scripts\activation.ps1')) {
+foreach ($file in @('install.ps1', 'scripts\install-windows.ps1', 'scripts\cgpu.ps1', 'scripts\activation.ps1', 'scripts\winmanage.ps1')) {
   $tokens = $null
   $errors = $null
   $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $file), [ref]$tokens, [ref]$errors)
@@ -22,7 +22,7 @@ $env:INST_NO_TTY = '1'
 $beforePath = $env:PATH
 $beforeUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $probe = Join-Path $PSScriptRoot ('check-' + [guid]::NewGuid().ToString('N'))
-$output = & (Join-Path $root 'install.ps1') -Check -All -Desktop -Prefix $probe -DesktopDir $probe 2>&1 | Out-String
+$output = & (Join-Path $root 'install.ps1') -Check -All -Desktop -WindowsManagement -Activation -Prefix $probe -DesktopDir $probe 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) { throw "Check failed with exit code $LASTEXITCODE`n$output" }
 if (Test-Path -LiteralPath $probe) { throw 'Check created a directory' }
 if ($env:PATH -cne $beforePath) { throw 'Check changed process PATH' }

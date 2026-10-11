@@ -3,7 +3,7 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
   [switch]$All, [switch]$Node, [switch]$Python, [switch]$Mirrors, [switch]$Agents, [switch]$Desktop,
-  [switch]$Check, [switch]$Update, [switch]$SelfUpdate, [switch]$InstallShortcut, [switch]$Cgpu, [switch]$Activation, [switch]$Menu,
+  [switch]$Check, [switch]$Update, [switch]$SelfUpdate, [switch]$InstallShortcut, [switch]$Cgpu, [switch]$WindowsManagement, [switch]$Activation, [switch]$Menu,
   [switch]$DryRun, [switch]$Yes, [switch]$Quiet, [switch]$Version, [switch]$Help, [switch]$LibOnly,
   [switch]$OfficialAgents, [switch]$ApplySystemMirror,
   [string]$AgentList, [string]$AgentMethod, [string]$AgentPackages,
@@ -1181,6 +1181,50 @@ function Install-Cgpu {
   }
 }
 
+function Install-WindowsManagement {
+  $destination = Join-Path $env:USERPROFILE '.command'
+  $names = @('winmanage.ps1', 'winmanage.cmd', 'winmanage.md')
+  if ($DryRun) {
+    foreach ($name in $names) { Write-Plan "安装 $(Join-Path $destination $name)" }
+    Add-UserPath $destination -Force
+    return
+  }
+  $sourceDir = Split-Path -Parent $PSCommandPath
+  $staging = Join-Path ([IO.Path]::GetTempPath()) ('inst-winmanage-' + [Guid]::NewGuid().ToString('N'))
+  try {
+    New-Item -ItemType Directory -Force -Path $staging | Out-Null
+    foreach ($name in $names) {
+      $tempFile = Join-Path $staging $name
+      $localFile = Join-Path $sourceDir $name
+      if ($sourceDir -and (Test-Path -LiteralPath $localFile)) {
+        Copy-Item -LiteralPath $localFile -Destination $tempFile
+      } else {
+        Save-Download ($InstBase.TrimEnd('/') + '/scripts/' + $name) $tempFile
+      }
+      if ((Get-Item -LiteralPath $tempFile).Length -eq 0) { throw "winmanage 文件为空: $name" }
+    }
+    $tokens = $null; $parseErrors = $null
+    [Management.Automation.Language.Parser]::ParseFile((Join-Path $staging 'winmanage.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if ($parseErrors.Count) { throw "winmanage.ps1 语法错误: $($parseErrors[0])" }
+
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    foreach ($name in $names) {
+      $source = Join-Path $staging $name
+      $target = Join-Path $destination $name
+      if (Test-Path -LiteralPath $target) {
+        if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash) { continue }
+        $backup = "$target.inst.bak"
+        if (-not (Test-Path -LiteralPath $backup)) { Copy-Item -LiteralPath $target -Destination $backup }
+      }
+      Copy-Item -LiteralPath $source -Destination $target -Force
+    }
+    Add-UserPath $destination -Force
+    Write-Ok "已安装 Windows 系统管理 winmanage（默认只读）：$destination；新开终端输入 winmanage"
+  } finally {
+    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+}
+
 function Install-Activation {
   $destination = Join-Path $env:USERPROFILE '.command'
   $names = @('activation.ps1', 'activation.cmd', 'activation.md')
@@ -1410,10 +1454,12 @@ function Show-MainMenu {
     Write-Host ' [常用工具]'
     Write-MenuLine 8 '环境检查'
     Write-MenuLine 10 'cgpu 显卡监控' '安装 CMD / PowerShell 一秒刷新命令'
+    Write-Host ' [系统管理]'
+    Write-MenuLine 11 'Windows 系统管理' '安装 winmanage：更新 / Defender 状态、预演、备份恢复'
     Write-Host ' [系统激活]'
     Write-MenuLine 12 '激活管理入口' '安装 activation：只读状态 / 微软入口 / 第三方项目参考'
     Write-Host ' [组合安装与 inst 维护]'
-    Write-MenuLine 7 '一键安装' '仅 1 + 2 + 3 + 4，不含系统激活'
+    Write-MenuLine 7 '一键安装' '仅 1 + 2 + 3 + 4，不含系统管理/激活'
     Write-MenuLine 9 '更新已安装工具'
     Write-MenuLine 00 '脚本更新' $(if (Test-Path -LiteralPath $ShortcutScript) { '快捷命令: inst' } else { '' })
     Write-MenuLine 88 '安装快捷命令' 'inst'
@@ -1430,6 +1476,7 @@ function Show-MainMenu {
       '8' { Invoke-MenuAction { Show-Check } | Out-Null }
       '9' { Invoke-MenuAction { Update-All } | Out-Null }
       '10' { Invoke-MenuAction { Install-Cgpu } | Out-Null }
+      '11' { Invoke-MenuAction { Install-WindowsManagement } | Out-Null }
       '12' { Invoke-MenuAction { Install-Activation } | Out-Null }
       '00' { Show-UpdateMenu }
       '88' { Invoke-MenuAction { Install-Shortcut } | Out-Null }
@@ -1462,6 +1509,8 @@ AI 工具:
 常用工具:
   -Cgpu           安装 cgpu 显卡实时监控命令 (cmd / PowerShell)
   -Check          只读环境检查
+系统管理:
+  -WindowsManagement 安装 Windows 系统管理命令 winmanage（默认只读）
 系统激活:
   -Activation     安装 activation（默认只读，不执行激活脚本）
 inst 维护:
@@ -1498,7 +1547,7 @@ function Invoke-InstMain {
   if ($AgentPackages) { $script:Agents = $true }
   if ($BaseUrl -or $AnthropicBaseUrl -or $OpenAiBaseUrl -or $Endpoint) { $script:DoEndpoint = $true } else { $script:DoEndpoint = $false }
   if ($All) { $script:Node = $true; $script:Python = $true; $script:Mirrors = $true; $script:Agents = $true }
-  $any = $Node -or $Python -or $Mirrors -or $Agents -or $Desktop -or $Check -or $Update -or $SelfUpdate -or $InstallShortcut -or $Cgpu -or $Activation -or $script:DoEndpoint
+  $any = $Node -or $Python -or $Mirrors -or $Agents -or $Desktop -or $Check -or $Update -or $SelfUpdate -or $InstallShortcut -or $Cgpu -or $WindowsManagement -or $Activation -or $script:DoEndpoint
   if ($Menu -or -not $any) {
     if ([Environment]::UserInteractive -and -not $env:INST_NO_TTY -and -not [Console]::IsInputRedirected) { Show-MainMenu; return }
     Show-Usage; $script:InstExitCode = 2; return
@@ -1508,6 +1557,7 @@ function Invoke-InstMain {
   Write-Inst "检测到 Windows $([Environment]::OSVersion.Version) $Arch，PowerShell $($PSVersionTable.PSVersion)"
   if ($InstallShortcut) { Install-Shortcut }
   if ($Cgpu) { Install-Cgpu }
+  if ($WindowsManagement) { Install-WindowsManagement }
   if ($Activation) { Install-Activation }
   if ($script:DoEndpoint) { Set-AgentEndpoints }
   if ($Mirrors) { Set-Mirrors }

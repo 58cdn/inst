@@ -37,6 +37,7 @@ jobs:
         run: |
           ./tests/download-regression.ps1
           ./tests/activation.ps1
+          ./tests/windows-management.ps1
           ./tests/check-readonly.ps1
           ./tests/node-version.ps1
           ./tests/python-version.ps1
@@ -47,6 +48,7 @@ jobs:
         run: |
           ./tests/download-regression.ps1
           ./tests/activation.ps1
+          ./tests/windows-management.ps1
           ./tests/check-readonly.ps1
   # https://inst.linux.yun (Cloudflare Workers, see wrangler.jsonc). Runs only after every
   # check passed on the default branch. Needs the repository secrets CLOUDFLARE_API_TOKEN

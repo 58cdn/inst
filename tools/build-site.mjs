@@ -21,6 +21,7 @@ const files = [
   ['docs/features/activation.md'],
   ['docs/features/maintenance.md'],
   ['docs/features/system.md'],
+  ['scripts/winmanage.ps1'], ['scripts/winmanage.cmd'], ['scripts/winmanage.md'],
   ['scripts/cgpu.ps1'], ['scripts/cgpu.cmd'], ['scripts/cgpu.md'],
   ['site/index.html', 'index.html'], ['site/_headers', '_headers'],
 ];
