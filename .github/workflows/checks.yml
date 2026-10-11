@@ -27,6 +27,7 @@ jobs:
         run: |
           node tools/build-site.mjs
           node tests/worker.test.mjs
+          node tests/features.test.mjs
   windows:
     runs-on: windows-latest
     steps:
@@ -35,6 +36,7 @@ jobs:
         shell: powershell
         run: |
           ./tests/download-regression.ps1
+          ./tests/activation.ps1
           ./tests/windows-management.ps1
           ./tests/check-readonly.ps1
           ./tests/node-version.ps1
@@ -45,6 +47,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/download-regression.ps1
+          ./tests/activation.ps1
           ./tests/windows-management.ps1
           ./tests/check-readonly.ps1
   # https://inst.linux.yun (Cloudflare Workers, see wrangler.jsonc). Runs only after every

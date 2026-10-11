@@ -45,19 +45,33 @@ $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; 
 - 清单获取失败、节点探测超时、节点返回错误或全部节点不可用时，继续使用 `https://inst.linux.yun`；只有后续实际下载也失败时才按原流程报错。
 - `mirrors.json` 是官网发布的节点清单，新增节点必须提供与站点相同的静态路径（至少包含 `VERSION`、`scripts/` 和入口脚本）。
 
+## 按功能导航
+
+[完整功能分组](docs/features/README.md)：开发环境、网络与镜像、AI 工具、常用工具、系统管理、系统激活、inst 维护。现有菜单编号与 CLI 参数保持兼容；[架构规划](docs/architecture.md) 说明后续最小迁移方式。
+
+Windows 菜单 **12** 或 `inst -Activation` 安装默认只读的 `activation` 命令：查询 Windows 激活状态，显式访问微软设置/疑难解答及第三方 MAS 项目参考。不下载或执行激活脚本，不承诺永久激活，激活状态不证明正版许可。见 [已实现功能与限制](docs/features/activation.md)。
+
 ## 菜单
 ```
+ [开发环境]
  1  Node.js 环境     nvm / Node.js LTS / npm / pnpm
  2  Python 环境      pyenv / Python / Miniconda
+ [网络与镜像]
  3  镜像源配置       系统 / npm / pip / conda / Homebrew
+ [AI 工具]
  4  Agents CLI       Claude Code / Codex / Gemini / OpenCode / Grok / OpenClaw / Hermes / Pi
  5  Agents 桌面端    Claude / Codex Desktop
  6  Agents 地址配置  API Base URL / Key
- 7  一键安装         1 + 2 + 3 + 4
+ [常用工具]
  8  环境检查
+ 10 cgpu 显卡监控    Windows：安装 CMD / PowerShell 监控命令
+ [系统管理]
+ 11 Windows 系统管理 安装 winmanage：更新 / Defender 状态、预演、备份恢复
+ [系统激活]
+ 12 激活管理入口     Windows：安装只读状态、微软入口和第三方项目参考
+ [组合安装与 inst 维护]
+ 7  一键安装         仅 1 + 2 + 3 + 4，不含系统管理/激活
  9  更新已安装工具
- 10  cgpu 显卡监控     Windows CMD / PowerShell，1 秒刷新 nvidia-smi
- 11  Windows 系统管理  安装 winmanage：更新 / Defender 状态、预演、备份恢复
  00 脚本更新         立即更新 / 开启或关闭每日自动更新
  88 安装快捷命令
  0  退出
