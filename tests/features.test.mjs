@@ -6,6 +6,8 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read=p=>readFileSync(resolve(root,p),'utf8');
 const win=read('scripts/install-windows.ps1');
 const unix=read('scripts/install-unix.sh');
+const version=read('VERSION').trim();
+assert.ok(win.includes(`$InstVersion = '${version}'`) && unix.includes(`INST_VERSION="${version}"`), 'Release version mismatch');
 for(const key of ['1','2','3','4','5','6','7','8','9','00','88','0']) {
   assert.match(win,new RegExp(`Write-MenuLine ${key} `));
   assert.match(unix,new RegExp(`menu_line ${key} `));
@@ -28,7 +30,7 @@ assert.ok(!/Activation|Cgpu|WindowsManagement/.test(all));
 assert.match(unix,/all_in_one\(\)\{ install_node; install_python; configure_mirrors; install_agents; \}/);
 const activation=read('scripts/activation.ps1');
 assert.ok(!/Invoke-Expression|Invoke-WebRequest|Invoke-RestMethod|DownloadString|Invoke-CimMethod|slmgr|ospp|Set-MpPreference|Set-ItemProperty/i.test(activation));
-for(const file of ['install.sh','install.zsh','install.ps1','install.cmd','scripts/install-unix.sh','scripts/install-windows.ps1','scripts/cgpu.ps1','scripts/cgpu.cmd','scripts/cgpu.md','scripts/activation.ps1','scripts/activation.cmd','scripts/activation.md','scripts/winmanage.ps1','scripts/winmanage.cmd','scripts/winmanage.md','docs/architecture.md',...['README','runtime','mirrors','agents','tools','activation','system','maintenance'].map(n=>`docs/features/${n}.md`)]) {
+for(const file of ['VERSION','install.sh','install.zsh','install.ps1','install.cmd','scripts/install-unix.sh','scripts/install-windows.ps1','scripts/cgpu.ps1','scripts/cgpu.cmd','scripts/cgpu.md','scripts/activation.ps1','scripts/activation.cmd','scripts/activation.md','scripts/winmanage.ps1','scripts/winmanage.cmd','scripts/winmanage.md','docs/architecture.md',...['README','runtime','mirrors','agents','tools','activation','system','maintenance'].map(n=>`docs/features/${n}.md`)]) {
   assert.ok(existsSync(resolve(root,'dist',file)),`Missing published path: ${file}`);
   assert.deepEqual(readFileSync(resolve(root,file)),readFileSync(resolve(root,'dist',file)),`Published bytes differ: ${file}`);
 }
