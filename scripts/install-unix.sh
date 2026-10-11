@@ -1282,17 +1282,20 @@ main_menu(){
   local c
   while true; do
     banner
+    printf ' [开发环境]\n'
     menu_line 1 'Node.js 环境' 'nvm / Node.js LTS / npm / pnpm'
     menu_line 2 'Python 环境' 'pyenv / Python / Miniconda'
+    printf ' [网络与镜像]\n'
     menu_line 3 '镜像源配置' '系统 / npm / pip / conda / Homebrew'
+    printf ' [AI 工具]\n'
     menu_line 4 'Agents CLI' 'Claude Code / Codex / Gemini / OpenCode / Grok / OpenClaw / Hermes / Pi'
     menu_line 5 'Agents 桌面端' 'Claude / Codex Desktop'
     menu_line 6 'Agents 地址配置' 'API Base URL / Key'
-    printf -- '------------------------------------------------\n'
-    menu_line 7 '一键安装' '1 + 2 + 3 + 4'
+    printf ' [常用工具]\n'
     menu_line 8 '环境检查'
+    printf ' [组合安装与 inst 维护]\n'
+    menu_line 7 '一键安装' '仅 1 + 2 + 3 + 4'
     menu_line 9 '更新已安装工具'
-    printf -- '------------------------------------------------\n'
     menu_line 00 '脚本更新' "$([[ -f "$SHORTCUT_PATH" ]] && echo "快捷命令: $SHORTCUT_NAME")"
     menu_line 88 '安装快捷命令' "$SHORTCUT_NAME"
     menu_line 0 '退出'
@@ -1324,13 +1327,18 @@ inst v$INST_VERSION  跨平台开发环境 & AI Agents 安装器
 
 组件:
   --all                  Node + Python + 镜像 + Agents CLI
+开发环境:
   --node                 nvm、Node.js LTS、npm、pnpm
   --python               pyenv、Python 最新稳定版、Miniconda
+网络与镜像:
   --mirrors              npm / pip / conda / nvm / pyenv 镜像（中国区域自动启用）
+AI 工具:
   --agents               Agents CLI（默认 ${DEFAULT_AGENTS}）
   --desktop              Claude / Codex 桌面端
   --endpoint LIST        为 Agent 写入地址配置: claude,codex,gemini,opencode,pi,openai
+常用工具:
   --check                只读环境检查
+inst 维护:
   --update               更新已安装的工具与 Agents
   --self-update          更新本脚本（快捷命令模式）
   --install-shortcut     安装快捷命令 ~/.local/bin/$SHORTCUT_NAME
