@@ -11,7 +11,7 @@ source "$root/scripts/install-unix.sh"
 fail(){ printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 main_menu_content > "$scratch/menu"
 keys=$(sed -nE 's/^ *([0-9]+)  .*/\1/p' "$scratch/menu" | tr '\n' ' ')
-[[ "$keys" == '1 2 3 4 5 6 8 7 9 00 88 0 ' ]] || fail "menu keys: $keys"
+[[ "$keys" == '1 2 3 4 5 6 7 8 9 10 11 0 ' ]] || fail "menu keys: $keys"
 [[ $(grep -c '^---- \[' "$scratch/menu") == 5 ]] || fail 'category separators'
 [[ $(wc -l < "$scratch/menu") -le 20 ]] || fail 'main menu too tall'
 grep -q '01\|pyenv\|Hermes' "$scratch/menu" && fail 'long hints leaked into main menu'
@@ -21,7 +21,7 @@ for bad in '1.2' '01.2.3' '1.2.3.4' '1.2.3-beta' '<html>1.2.3</html>' '999999999
   valid_release_version "$bad" && fail "accepted invalid version: $bad"
 done
 version_gt 1.2.10 1.2.9 || fail 'numeric version comparison'
-echo 'PASS: single-column menu, separators, legacy keys and strict numeric versions'
+echo 'PASS: single-column menu, separators, consecutive keys and strict numeric versions'
 
 calls="$scratch/calls"; : > "$calls"
 TEST_MODE=ok; TEST_REPLY=9.9.9
@@ -80,15 +80,15 @@ if self_update > "$scratch/update-log" 2>&1; then fail 'downgrade accepted'; fi
 [[ "$(script_version "$current")" == 9.9.9 ]] || fail 'downgrade changed installed file'
 echo 'PASS: update manifest consistency, backup and downgrade prevention'
 
-# Exercise the actual main-menu dispatch. 00 must open updates, not exit as 0.
+# Exercise the actual main-menu dispatch. 10 opens updates, 0 exits.
 choice_index=0
 ask(){
-  if ((choice_index == 0)); then printf -v "$1" '%s' 00; else printf -v "$1" '%s' 0; fi
+  if ((choice_index == 0)); then printf -v "$1" '%s' 10; else printf -v "$1" '%s' 0; fi
   choice_index=$((choice_index + 1))
 }
 banner(){ :; }
 menu_update(){ echo 'UPDATE_OPENED'; }
 HAS_TTY=1
 (main_menu) > "$scratch/routing"
-[[ $(grep -c '^UPDATE_OPENED$' "$scratch/routing") -eq 1 ]] || fail '00 routing'
-echo 'PASS: 00 opens update menu; 0 exits'
+[[ $(grep -c '^UPDATE_OPENED$' "$scratch/routing") -eq 1 ]] || fail '10 routing'
+echo 'PASS: 10 opens update menu; 0 exits'
