@@ -52,30 +52,57 @@ $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; 
 Windows 菜单 **12** 或 `inst -Activation` 安装默认只读的 `activation` 命令：查询 Windows 激活状态，显式访问微软设置/疑难解答及第三方 MAS 项目参考。不下载或执行激活脚本，不承诺永久激活，激活状态不证明正版许可。见 [已实现功能与限制](docs/features/activation.md)。
 
 ## 菜单
+
+主菜单使用单列短标签，分类之间有分割线；详细说明放在子菜单，不使用中文补空格对齐。原有编号及 CLI 参数保持不变，Windows 专属的 10 / 11 / 12 不出现在 Unix 菜单中。
+
+```text
+ inst  v<本地版本>
+ 系统: Windows 19045 x64
+ Shell: PowerShell 5.1 | 区域: cn
+ 本地: v<本地版本> | 在线: v<在线版本>
+------------------------------------------------
+---- [开发环境] ----
+  1  Node.js 环境
+  2  Python 环境
+---- [网络与镜像] ----
+  3  镜像源配置
+---- [AI 工具] ----
+  4  Agents CLI
+  5  Agents 桌面端
+  6  Agents 地址配置
+---- [工具与系统] ----
+  8  环境检查
+ 10  NVIDIA 显卡监控
+ 11  Windows 系统管理
+ 12  Windows 激活管理
+---- [安装与维护] ----
+  7  一键安装开发环境
+  9  更新已安装工具
+ 00  检查 / 更新 inst
+ 88  安装快捷命令
+------------------------------------------------
+  0  退出
 ```
- [开发环境]
- 1  Node.js 环境     nvm / Node.js LTS / npm / pnpm
- 2  Python 环境      pyenv / Python / Miniconda
- [网络与镜像]
- 3  镜像源配置       系统 / npm / pip / conda / Homebrew
- [AI 工具]
- 4  Agents CLI       Claude Code / Codex / Gemini / OpenCode / Grok / OpenClaw / Hermes / Pi
- 5  Agents 桌面端    Claude / Codex Desktop
- 6  Agents 地址配置  API Base URL / Key
- [常用工具]
- 8  环境检查
- 10 cgpu 显卡监控    Windows：安装 CMD / PowerShell 监控命令
- [系统管理]
- 11 Windows 系统管理 安装 winmanage：更新 / Defender 状态、预演、备份恢复
- [系统激活]
- 12 激活管理入口     Windows：安装只读状态、微软入口和第三方项目参考
- [组合安装与 inst 维护]
- 7  一键安装         仅 1 + 2 + 3 + 4，不含系统管理/激活
- 9  更新已安装工具
- 00 脚本更新         立即更新 / 开启或关闭每日自动更新
- 88 安装快捷命令
- 0  退出
+
+一键安装仍然只包含 Node.js、Python、镜像和 Agents CLI，不包含显卡监控、系统管理或激活管理。
+
+### 在线版本与自动发布
+
+`VERSION` 是版本来源。默认分支的新改动通过 Ubuntu、macOS 和 Windows 检查后，发布任务自动将补丁号加一，并同步两个平台脚本中的常量；随后 Cloudflare 部署同一个版本提交。只在发布任务授予 `contents: write`，使用 `GITHUB_TOKEN` 的版本提交不会再次触发 push 工作流，部署在当前流程继续执行。无需额外 Token。
+
+重复运行已发布的 CI 会复用已有版本，不再次递增；落后于默认分支的旧任务不发布。推送冲突、分支保护拒绝、测试失败都会阻止后续部署，不会强制推送或绕过保护。以后启用禁止自动化直接推送的分支保护时，需要改用版本 PR 流程。没有配置现有 Cloudflare 凭据时仍然仅执行 dry-run，不代表网站已更新。
+
+本地维护命令（仅修改工作区，不自动提交）：
+
+```bash
+node tools/bump-version.mjs --check
+node tools/bump-version.mjs patch
+# 显式调整较大版本：minor 或 major
 ```
+
+菜单每次启动检查一次在线版本；成功与失败都在会话中缓存，`00` → `4` 可以刷新。按当前下载源 → 官网 → GitHub Raw 的顺序回退，每个请求设置 3 秒超时，附带缓存刷新参数；显式设置 `INST_RAW_BASE_URL` 时只使用该源，不跳到公共发布通道。`INST_NO_UPDATE_CHECK=1` 关闭检查。无法获取时显示“在线: 不可用”，不会误报“已是最新版”；`-Version` / `--version` 仍然只输出本地版本，不联网。
+
+更新前重新获取清单，从相应源下载并校验脚本版本和语法；清单与脚本版本不一致、下载到旧版本或备份失败时不替换本地脚本。`INST_FORCE_UPDATE=1` 允许重新下载相同版本，但不允许降级。在线版本号大于本地时，通过 `00` → `1` 更新本地快捷命令，再重新运行 `inst`。
 
 ## 功能
 

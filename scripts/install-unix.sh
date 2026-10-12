@@ -1071,12 +1071,40 @@ update_all(){
 SCRIPT_PATH=''
 if [[ -f "${BASH_SOURCE[0]:-}" ]]; then SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"; fi
 SHORTCUT_PATH="$BIN_DIR/$SHORTCUT_NAME"
-REMOTE_VERSION=''
+REMOTE_VERSION=''; REMOTE_VERSION_SOURCE=''; REMOTE_VERSION_STATUS=unchecked; REMOTE_VERSION_CHECKED=0
+valid_release_version(){ [[ "$1" =~ ^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$ ]]; }
 fetch_remote_version(){
-  [[ -n "$REMOTE_VERSION" ]] && return 0
-  [[ -n "${INST_NO_UPDATE_CHECK:-}" ]] && return 1
-  REMOTE_VERSION="$(curl -fsSL --max-time 3 "$BASE_URL/VERSION" 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
-  [[ "$REMOTE_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { REMOTE_VERSION=''; return 1; }
+  if [[ -n "${INST_NO_UPDATE_CHECK:-}" ]]; then
+    REMOTE_VERSION=''; REMOTE_VERSION_SOURCE=''; REMOTE_VERSION_STATUS=disabled; REMOTE_VERSION_CHECKED=0
+    return 1
+  fi
+  if [[ "${1:-}" != refresh ]] && ((REMOTE_VERSION_CHECKED)); then [[ -n "$REMOTE_VERSION" ]]; return; fi
+  REMOTE_VERSION=''; REMOTE_VERSION_SOURCE=''; REMOTE_VERSION_STATUS=unavailable; REMOTE_VERSION_CHECKED=1
+  local base text seen='|' stamp
+  local -a bases=("${BASE_URL%/}")
+  if [[ -z "${INST_RAW_BASE_URL:-}" ]]; then
+    bases+=('https://inst.linux.yun' 'https://raw.githubusercontent.com/58cdn/inst/master')
+  fi
+  stamp="$(date +%s)"
+  for base in "${bases[@]}"; do
+    [[ "$seen" == *"|$base|"* ]] && continue
+    seen="$seen$base|"
+    case "$base" in https://*@*) continue;; https://*) ;; *) continue;; esac
+    text="$(curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 2 --max-time 3 \
+      -H 'Cache-Control: no-cache' "$base/VERSION?inst_check=$stamp" 2>/dev/null \
+      | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true)"
+    if valid_release_version "$text"; then
+      REMOTE_VERSION="$text"; REMOTE_VERSION_SOURCE="$base"; REMOTE_VERSION_STATUS=ok
+      return 0
+    fi
+  done
+  return 1
+}
+online_version_label(){
+  if [[ -n "${INST_NO_UPDATE_CHECK:-}" || "$REMOTE_VERSION_STATUS" == disabled ]]; then printf '已关闭'
+  elif [[ -n "$REMOTE_VERSION" ]]; then printf 'v%s' "$REMOTE_VERSION"
+  elif [[ "$REMOTE_VERSION_STATUS" == unavailable ]]; then printf '不可用'
+  else printf '未检查'; fi
 }
 self_update_target(){
   if [[ -n "${INST_INSTALLER_PATH:-}" && -f "$INST_INSTALLER_PATH" ]]; then echo "$INST_INSTALLER_PATH"
@@ -1093,18 +1121,31 @@ self_update(){
   assert_https "$BASE_URL" INST_RAW_BASE_URL || return 2
   if ((DRY_RUN)); then log "将下载并校验 $BASE_URL/scripts/install-unix.sh，再替换 ${target}（旧版备份为 $target.bak）"; return 0; fi
   local current; current="$(script_version "$target")"
-  if [[ -z "${INST_FORCE_UPDATE:-}" && -n "$current" ]] && fetch_remote_version && ! version_gt "$REMOTE_VERSION" "$current"; then
+  fetch_remote_version refresh || true
+  if [[ -n "$current" && -n "$REMOTE_VERSION" ]] && version_gt "$current" "$REMOTE_VERSION"; then
+    warn "在线源 v${REMOTE_VERSION} 低于当前 v${current}，未降级"; return 0
+  fi
+  if [[ -z "${INST_FORCE_UPDATE:-}" && -n "$current" && "$REMOTE_VERSION" == "$current" ]]; then
     ok "已是最新版本 v${current}（INST_FORCE_UPDATE=1 可强制重新下载）"; return 0
   fi
   # 与 kejilion.sh 相同的防护：先下载到临时文件，校验非空、shebang、版本号与语法后再替换，并保留备份。
   local tmp; tmp="$(mktemp "${target}.tmp.XXXXXX")"
-  if ! inst_download "$BASE_URL/scripts/install-unix.sh" "$tmp" \
+  if ! inst_download "${REMOTE_VERSION_SOURCE:-$BASE_URL}/scripts/install-unix.sh" "$tmp" \
     || [[ ! -s "$tmp" || "$(head -c 2 "$tmp")" != '#!' || -z "$(script_version "$tmp")" ]] || ! bash -n "$tmp"; then
     rm -f "$tmp"; err '下载或校验失败，未替换'; return 1
   fi
-  cp -p "$target" "$target.bak" 2>/dev/null || true
+  local downloaded; downloaded="$(script_version "$tmp")"
+  if ! valid_release_version "$downloaded" || [[ -n "$REMOTE_VERSION" && "$downloaded" != "$REMOTE_VERSION" ]]; then
+    rm -f "$tmp"; err '版本清单与脚本不一致，请稍后刷新；未替换'; return 1
+  fi
+  if [[ -n "$current" ]] && version_gt "$current" "$downloaded"; then
+    rm -f "$tmp"; err '下载的脚本较旧，拒绝降级；未替换'; return 1
+  fi
+  if ! cp -p "$target" "$target.bak"; then
+    rm -f "$tmp"; err '备份失败，未替换'; return 1
+  fi
   chmod +x "$tmp"; mv "$tmp" "$target"
-  REMOTE_VERSION=''
+  REMOTE_VERSION=''; REMOTE_VERSION_CHECKED=0
   ok "已更新: $target (v${current:-?} -> v$(script_version "$target"))，备份: $target.bak"
 }
 script_version(){ sed -n 's/^INST_VERSION="\(.*\)"/\1/p' "$1" 2>/dev/null | head -n 1; }
@@ -1137,25 +1178,43 @@ auto_update(){
 }
 
 # ---------------------------------------------------------------- 菜单
+menu_separator(){ printf '%s\n' '------------------------------------------------'; }
+menu_section(){ printf '%s---- [%s] ----%s\n' "$C_C" "$1" "$C_0"; }
 banner(){
-  ((HAS_TTY)) && [[ -t 1 ]] && clear
-  printf '%s' "$C_C"
-  cat <<'EOF'
-   _           _
-  (_)_ __  ___| |_
-  | | '_ \/ __| __|
-  | | | | \__ \ |_
-  |_|_| |_|___/\__|
-EOF
-  printf '%s  v%s  %s\n' "$C_0" "$INST_VERSION" "${C_D}跨平台开发环境 & AI Agents 安装器${C_0}"
-  printf -- '------------------------------------------------\n'
-  printf ' 系统: %s | Shell: %s | 区域: %s\n' "$(platform_label)" "$LOGIN_SHELL" "$REGION"
+  if ((HAS_TTY)) && [[ -t 1 ]]; then clear; fi
+  printf '%s inst  v%s%s\n' "$C_C" "$INST_VERSION" "$C_0"
+  printf ' 系统: %s\n Shell: %s | 区域: %s\n' "$(platform_label)" "$LOGIN_SHELL" "$REGION"
+  printf ' 本地: v%s | 在线: %s\n' "$INST_VERSION" "$(online_version_label)"
   if [[ -n "$REMOTE_VERSION" ]] && version_gt "$REMOTE_VERSION" "$INST_VERSION"; then
-    printf ' %s发现新版本 v%s，输入 00 更新%s\n' "$C_Y" "$REMOTE_VERSION" "$C_0"
+    printf '%s 发现新版本，输入 00 检查 / 更新 inst%s\n' "$C_Y" "$C_0"
   fi
-  printf -- '------------------------------------------------\n'
+  menu_separator
 }
-menu_line(){ printf ' %s%-4s%s %-14s %s%s%s\n' "$C_G" "$1" "$C_0" "$2" "$C_D" "${3:-}" "$C_0"; }
+menu_line(){
+  # Only ASCII keys are padded. Submenu hints get their own line, never CJK columns.
+  printf ' %2s  %s\n' "$1" "$2"
+  if [[ -n "${3:-}" ]]; then printf '     %s%s%s\n' "$C_D" "$3" "$C_0"; fi
+}
+main_menu_content(){
+  menu_section '开发环境'
+  menu_line 1 'Node.js 环境'
+  menu_line 2 'Python 环境'
+  menu_section '网络与镜像'
+  menu_line 3 '镜像源配置'
+  menu_section 'AI 工具'
+  menu_line 4 'Agents CLI'
+  menu_line 5 'Agents 桌面端'
+  menu_line 6 'Agents 地址配置'
+  menu_section '工具与系统'
+  menu_line 8 '环境检查'
+  menu_section '安装与维护'
+  menu_line 7 '一键安装开发环境'
+  menu_line 9 '更新已安装工具'
+  menu_line 00 '检查 / 更新 inst'
+  menu_line 88 '安装快捷命令'
+  menu_separator
+  menu_line 0 '退出'
+}
 LAST_RC=0
 run_action(){ # 在子 shell 中执行，失败返回菜单而不是退出；不能写成 ( ... ) || ，否则子 shell 内 set -e 失效
   set +e
@@ -1262,16 +1321,23 @@ menu_endpoint(){
 }
 menu_update(){
   local c
-  banner
-  printf ' %s脚本更新%s  当前 v%s  最新 v%s\n' "$C_B" "$C_0" "$INST_VERSION" "${REMOTE_VERSION:-未知}"
-  menu_line 1 立即更新; menu_line 2 开启每日自动更新; menu_line 3 关闭自动更新; menu_line 0 返回
-  ask c '请选择' 1
-  case "$c" in
-    1) if [[ -z "$(self_update_target)" ]]; then run_action install_shortcut
-       else run_action self_update; ((LAST_RC == 0)) && { log '重新启动...'; exec bash "$(self_update_target)"; }; fi;;
-    2) run_action auto_update on;;
-    3) run_action auto_update off;;
-  esac
+  while true; do
+    banner
+    menu_section 'inst 更新'
+    if [[ -n "$REMOTE_VERSION_SOURCE" ]]; then printf ' 更新源: %s\n' "$REMOTE_VERSION_SOURCE"; fi
+    menu_line 1 立即更新; menu_line 2 开启每日自动更新; menu_line 3 关闭自动更新
+    menu_line 4 刷新在线版本; menu_line 0 返回
+    ask c '请选择' 0
+    case "$c" in
+      1) if [[ -z "$(self_update_target)" ]]; then run_action install_shortcut
+         else run_action self_update; if ((LAST_RC == 0)); then log '重新启动...'; exec bash "$(self_update_target)"; fi; fi;;
+      2) run_action auto_update on;;
+      3) run_action auto_update off;;
+      4) fetch_remote_version refresh || true;;
+      0|q) return;;
+      *) warn '无效选项'; pause;;
+    esac
+  done
 }
 all_in_one(){ install_node; install_python; configure_mirrors; install_agents; }
 main_menu(){
@@ -1282,24 +1348,7 @@ main_menu(){
   local c
   while true; do
     banner
-    printf ' [开发环境]\n'
-    menu_line 1 'Node.js 环境' 'nvm / Node.js LTS / npm / pnpm'
-    menu_line 2 'Python 环境' 'pyenv / Python / Miniconda'
-    printf ' [网络与镜像]\n'
-    menu_line 3 '镜像源配置' '系统 / npm / pip / conda / Homebrew'
-    printf ' [AI 工具]\n'
-    menu_line 4 'Agents CLI' 'Claude Code / Codex / Gemini / OpenCode / Grok / OpenClaw / Hermes / Pi'
-    menu_line 5 'Agents 桌面端' 'Claude / Codex Desktop'
-    menu_line 6 'Agents 地址配置' 'API Base URL / Key'
-    printf ' [常用工具]\n'
-    menu_line 8 '环境检查'
-    printf ' [组合安装与 inst 维护]\n'
-    menu_line 7 '一键安装' '仅 1 + 2 + 3 + 4'
-    menu_line 9 '更新已安装工具'
-    menu_line 00 '脚本更新' "$([[ -f "$SHORTCUT_PATH" ]] && echo "快捷命令: $SHORTCUT_NAME")"
-    menu_line 88 '安装快捷命令' "$SHORTCUT_NAME"
-    menu_line 0 '退出'
-    printf -- '------------------------------------------------\n'
+    main_menu_content
     ask c '请输入你的选择' ''
     case "$c" in
       1) run_action install_node;;
@@ -1430,4 +1479,4 @@ main(){
   if ((DRY_RUN)); then log '预览结束，未执行安装'; else ok '所选步骤执行结束；新开终端或执行 source ~/.config/inst/env.sh 使环境生效'; fi
 }
 
-main "$@"
+if [[ "${INST_LIB_ONLY:-}" != 1 ]]; then main "$@"; fi

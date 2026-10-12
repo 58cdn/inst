@@ -1080,13 +1080,46 @@ function Update-All {
 }
 
 # ---------------------------------------------------------------- 脚本自更新与快捷命令
-function Get-RemoteVersion {
-  if ($env:INST_NO_UPDATE_CHECK) { return '' }
-  try {
-    $text = ([string](Invoke-RestMethod -Uri "$InstBase/VERSION" -TimeoutSec 3 -UseBasicParsing)).Trim()
-    if ($text -match '^\d+(\.\d+)*$') { return $text }
-  } catch { }
+$script:RemoteVersion = ''
+$script:RemoteVersionSource = ''
+$script:RemoteVersionStatus = 'unchecked'
+$script:RemoteVersionChecked = $false
+function Test-ReleaseVersion([string]$Value) {
+  return $Value -cmatch '\A(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\z'
+}
+function Get-RemoteVersion([switch]$Refresh) {
+  if ($env:INST_NO_UPDATE_CHECK) {
+    $script:RemoteVersion = ''; $script:RemoteVersionSource = ''
+    $script:RemoteVersionStatus = 'disabled'; $script:RemoteVersionChecked = $false
+    return ''
+  }
+  if (-not $Refresh -and $script:RemoteVersionChecked) { return $script:RemoteVersion }
+  $script:RemoteVersionChecked = $true
+  $script:RemoteVersion = ''; $script:RemoteVersionSource = ''; $script:RemoteVersionStatus = 'unavailable'
+  $bases = @($InstBase.TrimEnd('/'))
+  # An explicit/pinned source must not silently switch to the public release channel.
+  if (-not $env:INST_RAW_BASE_URL) {
+    $bases += @('https://inst.linux.yun', 'https://raw.githubusercontent.com/58cdn/inst/master')
+  }
+  foreach ($base in @($bases | Select-Object -Unique)) {
+    try {
+      Assert-HttpsUrl $base '版本源'
+      if (([Uri]$base).UserInfo) { continue }
+      $uri = "$base/VERSION?inst_check=$([DateTime]::UtcNow.Ticks)"
+      $text = ([string](Invoke-RestMethod -Uri $uri -TimeoutSec 3 -UseBasicParsing -Headers @{ 'Cache-Control' = 'no-cache' })).Trim()
+      if (Test-ReleaseVersion $text) {
+        $script:RemoteVersion = $text; $script:RemoteVersionSource = $base; $script:RemoteVersionStatus = 'ok'
+        return $text
+      }
+    } catch { }
+  }
   return ''
+}
+function Get-OnlineVersionLabel {
+  if ($env:INST_NO_UPDATE_CHECK -or $script:RemoteVersionStatus -eq 'disabled') { return '已关闭' }
+  if ($script:RemoteVersion) { return "v$($script:RemoteVersion)" }
+  if ($script:RemoteVersionStatus -eq 'unavailable') { return '不可用' }
+  return '未检查'
 }
 function Get-SelfUpdateTarget {
   if ($env:INST_INSTALLER_PATH -and (Test-Path -LiteralPath $env:INST_INSTALLER_PATH)) { return $env:INST_INSTALLER_PATH }
@@ -1097,11 +1130,11 @@ function Get-ScriptVersion([string]$Code) {
   if ($Code -match "(?m)^\`$InstVersion = '([^']+)'") { return $Matches[1] }
   return ''
 }
-function Get-RemoteScript {
-  Assert-HttpsUrl $InstBase 'INST_RAW_BASE_URL'
+function Get-RemoteScript([string]$Base = $InstBase) {
+  Assert-HttpsUrl $Base 'INST_RAW_BASE_URL'
   $temp = Join-Path ([IO.Path]::GetTempPath()) ('inst-update-' + [Guid]::NewGuid().ToString('N') + '.ps1')
   try {
-    Save-InstDownload "$InstBase/scripts/install-windows.ps1" $temp
+    Save-InstDownload "$Base/scripts/install-windows.ps1" $temp
     $bytes = [IO.File]::ReadAllBytes($temp)
   } finally { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
   $code = [Text.Encoding]::UTF8.GetString($bytes).TrimStart([char]0xFEFF)
@@ -1125,14 +1158,20 @@ function Update-Installer {
   if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Split-Path -Parent $target)) '.git')) { throw "$target 位于 git 仓库中，请使用 git pull 更新" }
   if ($DryRun) { Write-Plan "下载并校验 $InstBase/scripts/install-windows.ps1，然后替换 $target（旧版备份为 $target.bak）"; return }
   $current = Get-ScriptVersion ([IO.File]::ReadAllText($target, [Text.Encoding]::UTF8))
-  $remote = Get-RemoteVersion
-  if (-not $env:INST_FORCE_UPDATE -and $current -and $remote -and (Compare-InstVersion $remote $current) -le 0) {
+  $remote = Get-RemoteVersion -Refresh
+  if ($current -and $remote -and (Compare-InstVersion $remote $current) -lt 0) {
+    Write-Warn "在线源 v$remote 低于当前 v$current，未降级"; return
+  }
+  if (-not $env:INST_FORCE_UPDATE -and $current -and $remote -and (Compare-InstVersion $remote $current) -eq 0) {
     Write-Ok "已是最新版本 v$current（INST_FORCE_UPDATE=1 可强制重新下载）"; return
   }
-  $code = Get-RemoteScript
+  $source = if ($script:RemoteVersionSource) { $script:RemoteVersionSource } else { $InstBase }
+  $code = Get-RemoteScript $source
   $newVersion = Get-ScriptVersion $code
-  if (-not $newVersion) { throw '下载的脚本缺少版本号，未替换' }
-  Copy-Item -LiteralPath $target -Destination "$target.bak" -Force -ErrorAction SilentlyContinue
+  if (-not (Test-ReleaseVersion $newVersion)) { throw '下载的脚本缺少有效版本号，未替换' }
+  if ($remote -and $newVersion -ne $remote) { throw "版本清单 v$remote 与脚本 v$newVersion 不一致，请稍后刷新；未替换" }
+  if ($current -and (Compare-InstVersion $newVersion $current) -lt 0) { throw '下载的脚本较旧，拒绝降级；未替换' }
+  Copy-Item -LiteralPath $target -Destination "$target.bak" -Force -ErrorAction Stop
   Save-ScriptFile $target $code
   Write-Ok "已更新: $target (v$current -> v$newVersion)，备份: $target.bak"
 }
@@ -1300,30 +1339,47 @@ function Set-AutoUpdate([bool]$Enabled) {
 }
 
 # ---------------------------------------------------------------- 菜单
-$script:RemoteVersion = ''
+function Write-MenuSeparator { Write-Host ('-' * 48) -ForegroundColor Gray }
+function Write-MenuSection([string]$Title) { Write-Host "---- [${Title}] ----" -ForegroundColor Cyan }
 function Show-Banner {
   if ($Interactive) { Clear-Host }
-  Write-Host @'
-   _           _
-  (_)_ __  ___| |_
-  | | '_ \/ __| __|
-  | | | | \__ \ |_
-  |_|_| |_|___/\__|
-'@ -ForegroundColor Cyan
-  Write-Host "  v$InstVersion  " -NoNewline; Write-Host '跨平台开发环境 & AI Agents 安装器' -ForegroundColor DarkGray
-  Write-Host '------------------------------------------------'
-  # 入口脚本（install.cmd / inst.cmd / install.sh）通过 INST_LAUNCHER 告知调用方 shell
+  Write-Host " inst  v$InstVersion" -ForegroundColor Cyan
   $shell = switch ($env:INST_LAUNCHER) { 'cmd' { 'cmd' } 'bash' { 'Git Bash' } default { "PowerShell $($PSVersionTable.PSVersion.Major).$($PSVersionTable.PSVersion.Minor)" } }
-  Write-Host " 系统: Windows $([Environment]::OSVersion.Version.Build) $Arch | Shell: $shell | 区域: $(Get-InstRegion)"
+  Write-Host " 系统: Windows $([Environment]::OSVersion.Version.Build) $Arch"
+  Write-Host " Shell: $shell | 区域: $(Get-InstRegion)"
+  Write-Host " 本地: v$InstVersion | 在线: $(Get-OnlineVersionLabel)"
   if ($script:RemoteVersion -and (Compare-InstVersion $script:RemoteVersion $InstVersion) -gt 0) {
-    Write-Host " 发现新版本 v$($script:RemoteVersion)，输入 00 更新" -ForegroundColor Yellow
+    Write-Host ' 发现新版本，输入 00 检查 / 更新 inst' -ForegroundColor Yellow
   }
-  Write-Host '------------------------------------------------'
+  Write-MenuSeparator
 }
 function Write-MenuLine([string]$Key, [string]$Label, [string]$Hint = '') {
-  Write-Host (' {0,-4} ' -f $Key) -ForegroundColor Green -NoNewline
-  Write-Host ('{0,-16}' -f $Label) -NoNewline
-  Write-Host $Hint -ForegroundColor DarkGray
+  # Pad only the ASCII key: character counts are not CJK display-column widths.
+  Write-Host (' {0,2}  {1}' -f $Key, $Label) -ForegroundColor White
+  if ($Hint) { Write-Host "     $Hint" -ForegroundColor Gray }
+}
+function Write-MainMenu {
+  Write-MenuSection '开发环境'
+  Write-MenuLine 1 'Node.js 环境'
+  Write-MenuLine 2 'Python 环境'
+  Write-MenuSection '网络与镜像'
+  Write-MenuLine 3 '镜像源配置'
+  Write-MenuSection 'AI 工具'
+  Write-MenuLine 4 'Agents CLI'
+  Write-MenuLine 5 'Agents 桌面端'
+  Write-MenuLine 6 'Agents 地址配置'
+  Write-MenuSection '工具与系统'
+  Write-MenuLine 8 '环境检查'
+  Write-MenuLine 10 'NVIDIA 显卡监控'
+  Write-MenuLine 11 'Windows 系统管理'
+  Write-MenuLine 12 'Windows 激活管理'
+  Write-MenuSection '安装与维护'
+  Write-MenuLine 7 '一键安装开发环境'
+  Write-MenuLine 9 '更新已安装工具'
+  Write-MenuLine '00' '检查 / 更新 inst'
+  Write-MenuLine 88 '安装快捷命令'
+  Write-MenuSeparator
+  Write-MenuLine 0 '退出'
 }
 function Invoke-MenuAction([scriptblock]$Action) {
   $ok = $true
@@ -1419,21 +1475,32 @@ function Show-EndpointMenu {
   Invoke-MenuAction { Set-AgentEndpoints } | Out-Null
 }
 function Show-UpdateMenu {
-  Show-Banner
-  Write-Host " 脚本更新  当前 v$InstVersion  最新 v$(if ($script:RemoteVersion) { $script:RemoteVersion } else { '未知' })" -ForegroundColor White
-  Write-MenuLine 1 '立即更新'; Write-MenuLine 2 '开启每日自动更新'; Write-MenuLine 3 '关闭自动更新'; Write-MenuLine 0 '返回'
-  switch (Read-Choice '请选择' '1') {
-    '1' {
-      if (-not (Get-SelfUpdateTarget)) {
-        if ($IsRemote) { Write-Inst '在线运行模式每次都是最新版，已为你安装快捷命令以便离线使用' }
-        Invoke-MenuAction { Install-Shortcut } | Out-Null
-      } elseif (Invoke-MenuAction { Update-Installer }) {
-        Write-Inst '请重新运行 inst 以使用新版本'
-        $script:ExitMenu = $true
+  while (-not $script:ExitMenu) {
+    Show-Banner
+    Write-MenuSection 'inst 更新'
+    if ($script:RemoteVersionSource) { Write-Host " 更新源: $($script:RemoteVersionSource)" -ForegroundColor Gray }
+    Write-MenuLine 1 '立即更新'
+    Write-MenuLine 2 '开启每日自动更新'
+    Write-MenuLine 3 '关闭自动更新'
+    Write-MenuLine 4 '刷新在线版本'
+    Write-MenuLine 0 '返回'
+    switch (Read-Choice '请选择' '0') {
+      '1' {
+        if (-not (Get-SelfUpdateTarget)) {
+          Write-Inst '尚未安装本地快捷命令，将安装 inst 以便后续更新'
+          Invoke-MenuAction { Install-Shortcut } | Out-Null
+        } elseif (Invoke-MenuAction { Update-Installer }) {
+          Write-Inst '请重新运行 inst 以加载本地脚本'
+          $script:ExitMenu = $true
+        }
       }
+      '2' { Invoke-MenuAction { Set-AutoUpdate $true } | Out-Null }
+      '3' { Invoke-MenuAction { Set-AutoUpdate $false } | Out-Null }
+      '4' { [void](Get-RemoteVersion -Refresh) }
+      '0' { return }
+      'q' { return }
+      default { Write-Warn '无效选项'; Wait-Inst }
     }
-    '2' { Invoke-MenuAction { Set-AutoUpdate $true } | Out-Null }
-    '3' { Invoke-MenuAction { Set-AutoUpdate $false } | Out-Null }
   }
 }
 function Show-MainMenu {
@@ -1442,29 +1509,7 @@ function Show-MainMenu {
   $script:ExitMenu = $false
   while (-not $script:ExitMenu) {
     Show-Banner
-    Write-Host ' [开发环境]'
-    Write-MenuLine 1 'Node.js 环境' 'nvm-windows / Node.js LTS / npm / pnpm'
-    Write-MenuLine 2 'Python 环境' 'pyenv-win / Python / Miniconda'
-    Write-Host ' [网络与镜像]'
-    Write-MenuLine 3 '镜像源配置' 'winget / npm / pip / conda'
-    Write-Host ' [AI 工具]'
-    Write-MenuLine 4 'Agents CLI' 'Claude Code / Codex / Gemini / OpenCode / Grok / OpenClaw / Hermes / Pi'
-    Write-MenuLine 5 'Agents 桌面端' 'Claude / Codex Desktop'
-    Write-MenuLine 6 'Agents 地址配置' 'API Base URL / Key'
-    Write-Host ' [常用工具]'
-    Write-MenuLine 8 '环境检查'
-    Write-MenuLine 10 'cgpu 显卡监控' '安装 CMD / PowerShell 一秒刷新命令'
-    Write-Host ' [系统管理]'
-    Write-MenuLine 11 'Windows 系统管理' '安装 winmanage：更新 / Defender 状态、预演、备份恢复'
-    Write-Host ' [系统激活]'
-    Write-MenuLine 12 '激活管理入口' '安装 activation：只读状态 / 微软入口 / 第三方项目参考'
-    Write-Host ' [组合安装与 inst 维护]'
-    Write-MenuLine 7 '一键安装' '仅 1 + 2 + 3 + 4，不含系统管理/激活'
-    Write-MenuLine 9 '更新已安装工具'
-    Write-MenuLine 00 '脚本更新' $(if (Test-Path -LiteralPath $ShortcutScript) { '快捷命令: inst' } else { '' })
-    Write-MenuLine 88 '安装快捷命令' 'inst'
-    Write-MenuLine 0 '退出'
-    Write-Host '------------------------------------------------'
+    Write-MainMenu
     switch (Read-Choice '请输入你的选择') {
       '1' { Invoke-MenuAction { Install-Node } | Out-Null }
       '2' { Invoke-MenuAction { Install-Python } | Out-Null }
