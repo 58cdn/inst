@@ -21,8 +21,11 @@ jobs:
           bash -n scripts/install-unix.sh
           node --check tools/update-versions.mjs
           node tools/embed-download.mjs --check
+          node tools/bump-version.mjs --check
+          node tests/version.test.mjs
           python3 tests/download-regression.py
           bash tests/unix-regression.sh
+          bash tests/menu-version.sh
       - name: Site build and Worker routing
         run: |
           node tools/build-site.mjs
@@ -35,6 +38,7 @@ jobs:
       - name: Windows PowerShell checks
         shell: powershell
         run: |
+          ./tests/menu-version.ps1
           ./tests/download-regression.ps1
           ./tests/activation.ps1
           ./tests/windows-management.ps1
@@ -46,17 +50,45 @@ jobs:
       - name: PowerShell 7 download and parse checks
         shell: pwsh
         run: |
+          ./tests/menu-version.ps1
           ./tests/download-regression.ps1
           ./tests/activation.ps1
           ./tests/windows-management.ps1
           ./tests/check-readonly.ps1
-  # https://inst.linux.yun (Cloudflare Workers, see wrangler.jsonc). Runs only after every
-  # check passed on the default branch. Needs the repository secrets CLOUDFLARE_API_TOKEN
-  # ("Edit Cloudflare Workers" template) and CLOUDFLARE_ACCOUNT_ID; without them it only
-  # does a dry run.
-  deploy:
+  release:
     needs: [unix, windows]
     if: github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: inst-release
+      cancel-in-progress: false
+    outputs:
+      ready: ${{ steps.version.outputs.ready }}
+      sha: ${{ steps.version.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Publish a version-only commit for the tested revision
+        id: version
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          node tools/bump-version.mjs --release "$GITHUB_SHA" "$DEFAULT_BRANCH"
+  # GITHUB_TOKEN's push does not start another push workflow. Deploy its exact
+  # versioned SHA here instead, after tests and the guarded release push succeed.
+  deploy:
+    needs: [release]
+    if: needs.release.outputs.ready == 'true' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     concurrency: deploy
     env:
@@ -65,11 +97,22 @@ jobs:
       WRANGLER_SEND_METRICS: 'false'
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release.outputs.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: wrangler deploy
+        env:
+          RELEASE_SHA: ${{ needs.release.outputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          if [ "$(git rev-parse FETCH_HEAD)" != "$RELEASE_SHA" ]; then
+            echo '::notice::A newer revision exists; skipping stale deployment'
+            exit 0
+          fi
+          node tools/bump-version.mjs --check
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
             echo '::warning::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets are not set; running wrangler deploy --dry-run only'
             npx --yes wrangler@4.143.0 deploy --dry-run

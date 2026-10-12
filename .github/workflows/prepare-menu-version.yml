@@ -1,0 +1,32 @@
+# Branch-only editing helper; removed through the connector before opening the PR.
+name: Prepare menu version changes
+on:
+  push:
+    branches: [feat/menu-layout-auto-version]
+    paths: [tools/prepare-menu-version.py, .github/workflows/prepare-menu-version.yml]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply bounded edits and test without installing tools
+        run: |
+          python3 tools/prepare-menu-version.py
+          bash -n scripts/install-unix.sh
+          node tools/bump-version.mjs --check
+          node tests/version.test.mjs
+          bash tests/menu-version.sh
+          node tools/build-site.mjs
+          node tests/features.test.mjs
+      - name: Commit only to the requested feature branch
+        run: |
+          git config user.name '58CDN'
+          git config user.email '48397024+58cdn@users.noreply.github.com'
+          git add -- scripts/install-windows.ps1 scripts/install-unix.sh README.md tests/features.test.mjs tools/prepare-menu-version.py
+          git diff --cached --stat
+          git commit -m 'feat: clarify menus and verify online installer versions'
+          git push origin HEAD:refs/heads/feat/menu-layout-auto-version
