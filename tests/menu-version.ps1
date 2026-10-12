@@ -12,7 +12,7 @@ try {
   New-Item -ItemType Directory -Path $scratch | Out-Null
   $menuText = (Write-MainMenu 6>&1 | Out-String)
   $keys = @([regex]::Matches($menuText, '(?m)^ *([0-9]+)  ') | ForEach-Object { $_.Groups[1].Value }) -join ','
-  Assert ($keys -ceq '1,2,3,4,5,6,8,10,11,12,7,9,00,88,0') "Menu keys: $keys"
+  Assert ($keys -ceq '1,2,3,4,5,6,7,8,9,10,11,12,13,14,0') "Menu keys: $keys"
   Assert (([regex]::Matches($menuText, '(?m)^---- \[')).Count -eq 5) 'Missing category separators'
   Assert (-not $menuText.Contains('pyenv') -and -not $menuText.Contains('Hermes')) 'Main menu contains long hints'
   $hint = Write-MenuLine 2 'Python 环境' 'pyenv / Python' 6>&1 | Out-String
@@ -82,13 +82,13 @@ try {
   $script:ChoiceIndex = 0; $script:Opened = 0
   function Read-Choice([string]$Prompt, [string]$Default) {
     $script:ChoiceIndex++
-    if ($script:ChoiceIndex -eq 1) { return '00' }; return '0'
+    if ($script:ChoiceIndex -eq 1) { return '13' }; return '0'
   }
   function Show-Banner { }
   function Show-UpdateMenu { $script:Opened++ }
   Show-MainMenu
-  Assert ($script:Opened -eq 1) '00 dispatch confused with 0'
-  'PASS: 00 opens updates; 0 exits'
+  Assert ($script:Opened -eq 1) '13 dispatch confused with 0'
+  'PASS: 13 opens updates; 0 exits'
 } finally {
   foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name]) }
   Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
