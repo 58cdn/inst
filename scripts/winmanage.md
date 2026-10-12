@@ -1,6 +1,6 @@
 # Windows 系统管理（winmanage）
 
-适用于 Windows 10/11 客户端，PowerShell 5.1 / 7。菜单 **11** 或 `inst -WindowsManagement` 仅安装命令与帮助到 `%USERPROFILE%\.command`，不更改更新或安全配置；新终端运行 `winmanage` 默认只读。安装沿用 inst 的 HTTPS 下载、有限超时、暂存与 PowerShell 语法检查（独立资产不扩展现有自动回退白名单）。`inst -WindowsManagement -DryRun` 不下载、不写文件、不改 PATH。
+适用于 Windows 10/11 客户端，PowerShell 5.1 / 7。菜单 **9** 或 `inst -WindowsManagement` 仅安装命令与帮助到 `%USERPROFILE%\.command`，不更改更新或安全配置；新终端运行 `winmanage` 默认只读。安装沿用 inst 的 HTTPS 下载、有限超时、暂存与 PowerShell 语法检查（工具文件下载失败可切换到同仓库的官方 Raw / CDN 备用发布源）。`inst -WindowsManagement -DryRun` 不下载、不写文件、不改 PATH。
 
 ## 显式操作
 

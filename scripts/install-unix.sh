@@ -1186,7 +1186,7 @@ banner(){
   printf ' 系统: %s\n Shell: %s | 区域: %s\n' "$(platform_label)" "$LOGIN_SHELL" "$REGION"
   printf ' 本地: v%s | 在线: %s\n' "$INST_VERSION" "$(online_version_label)"
   if [[ -n "$REMOTE_VERSION" ]] && version_gt "$REMOTE_VERSION" "$INST_VERSION"; then
-    printf '%s 发现新版本，输入 00 检查 / 更新 inst%s\n' "$C_Y" "$C_0"
+    printf '%s 发现新版本，输入 10 检查 / 更新 inst%s\n' "$C_Y" "$C_0"
   fi
   menu_separator
 }
@@ -1206,12 +1206,12 @@ main_menu_content(){
   menu_line 5 'Agents 桌面端'
   menu_line 6 'Agents 地址配置'
   menu_section '工具与系统'
-  menu_line 8 '环境检查'
+  menu_line 7 '环境检查'
   menu_section '安装与维护'
-  menu_line 7 '一键安装开发环境'
+  menu_line 8 '一键安装开发环境'
   menu_line 9 '更新已安装工具'
-  menu_line 00 '检查 / 更新 inst'
-  menu_line 88 '安装快捷命令'
+  menu_line 10 '检查 / 更新 inst'
+  menu_line 11 '安装快捷命令'
   menu_separator
   menu_line 0 '退出'
 }
@@ -1357,10 +1357,12 @@ main_menu(){
       4) menu_agents;;
       5) menu_desktop;;
       6) menu_endpoint;;
-      7) run_action all_in_one;;
-      8) run_action check_installation;;
+      7) run_action check_installation;;
+      8) run_action all_in_one;;
       9) run_action update_all;;
-      00) menu_update;;
+      10) menu_update;;
+      11) run_action install_shortcut;;
+      00) menu_update;;  # Compatibility aliases.
       88) run_action install_shortcut;;
       0|q|exit) printf '再见\n'; exit 0;;
     esac

@@ -98,10 +98,23 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
   $Url
   $official = 'https://inst.linux.yun/'
   $github = 'https://raw.githubusercontent.com/58cdn/inst/master/'
-  foreach ($path in @('scripts/install-unix.sh','scripts/install-windows.ps1','install.sh','install.ps1')) {
-    if ($env:INST_RAW_BASE_URL -or $env:INST_MIRROR_AUTO -eq '0') { continue }
-    if ($Url -ceq ($official + $path)) { $github + $path }
-    if ($Url -ceq ($github + $path)) { $official + $path }
+  if (-not $env:INST_RAW_BASE_URL -and $env:INST_MIRROR_AUTO -ne '0') {
+    foreach ($path in @('scripts/install-unix.sh','scripts/install-windows.ps1','install.sh','install.ps1')) {
+      if ($Url -ceq ($official + $path)) { $github + $path }
+      if ($Url -ceq ($github + $path)) { $official + $path }
+    }
+    # Retry only well-known repository helpers. Do not remap arbitrary URLs or query parameters.
+    if ($Url -cmatch '^https://[^/?#]+/scripts/((?:cgpu|winmanage|activation)\.(?:ps1|cmd|md))$') {
+      $path = 'scripts/' + $Matches[1]
+      $selectedBase = if ($script:InstBase) { $script:InstBase.TrimEnd('/') } elseif ($env:INST_SELECTED_BASE_URL) { $env:INST_SELECTED_BASE_URL.TrimEnd('/') } else { '' }
+      if ($Url -ceq ($official + $path) -or $Url -ceq ($github + $path) -or ($selectedBase -and $Url -ceq ($selectedBase + '/' + $path))) {
+        # Emit each URL separately; PowerShell 5.1 can otherwise collapse + and comma expressions.
+        if ($Url -cne ($official + $path)) { $official + $path }
+        if ($Url -cne ($github + $path)) { $github + $path }
+        $cdn = 'https://cdn.jsdelivr.net/gh/58cdn/inst@master/' + $path
+        if ($Url -cne $cdn) { $cdn }
+      }
+    }
   }
   if ($Sha256 -and $Url -cmatch '^https://(repo\.anaconda\.com/miniconda|mirrors\.tuna\.tsinghua\.edu\.cn/anaconda/miniconda)/(Miniconda3-[a-zA-Z0-9._-]+)$') {
     $name = $Matches[2]
@@ -117,7 +130,12 @@ function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '',
   foreach ($candidate in (Get-InstDownloadCandidates $Url $Sha256)) {
     $index++
     try {
-      Save-InstDownloadAttempt $candidate $OutFile $Sha256
+      # Small assets should fail fast and move on to the next source.
+      if ($Url -cmatch '^https://[^/?#]+/scripts/(?:cgpu|winmanage|activation)\.(?:ps1|cmd|md)$') {
+        Save-InstDownloadAttempt $candidate $OutFile $Sha256 12 30
+      } else {
+        Save-InstDownloadAttempt $candidate $OutFile $Sha256
+      }
       if ($ResolvedUrl) { $ResolvedUrl.Value = $candidate }
       return
     }

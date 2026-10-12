@@ -291,10 +291,23 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
   $Url
   $official = 'https://inst.linux.yun/'
   $github = 'https://raw.githubusercontent.com/58cdn/inst/master/'
-  foreach ($path in @('scripts/install-unix.sh','scripts/install-windows.ps1','install.sh','install.ps1')) {
-    if ($env:INST_RAW_BASE_URL -or $env:INST_MIRROR_AUTO -eq '0') { continue }
-    if ($Url -ceq ($official + $path)) { $github + $path }
-    if ($Url -ceq ($github + $path)) { $official + $path }
+  if (-not $env:INST_RAW_BASE_URL -and $env:INST_MIRROR_AUTO -ne '0') {
+    foreach ($path in @('scripts/install-unix.sh','scripts/install-windows.ps1','install.sh','install.ps1')) {
+      if ($Url -ceq ($official + $path)) { $github + $path }
+      if ($Url -ceq ($github + $path)) { $official + $path }
+    }
+    # Retry only well-known repository helpers. Do not remap arbitrary URLs or query parameters.
+    if ($Url -cmatch '^https://[^/?#]+/scripts/((?:cgpu|winmanage|activation)\.(?:ps1|cmd|md))$') {
+      $path = 'scripts/' + $Matches[1]
+      $selectedBase = if ($script:InstBase) { $script:InstBase.TrimEnd('/') } elseif ($env:INST_SELECTED_BASE_URL) { $env:INST_SELECTED_BASE_URL.TrimEnd('/') } else { '' }
+      if ($Url -ceq ($official + $path) -or $Url -ceq ($github + $path) -or ($selectedBase -and $Url -ceq ($selectedBase + '/' + $path))) {
+        # Emit each URL separately; PowerShell 5.1 can otherwise collapse + and comma expressions.
+        if ($Url -cne ($official + $path)) { $official + $path }
+        if ($Url -cne ($github + $path)) { $github + $path }
+        $cdn = 'https://cdn.jsdelivr.net/gh/58cdn/inst@master/' + $path
+        if ($Url -cne $cdn) { $cdn }
+      }
+    }
   }
   if ($Sha256 -and $Url -cmatch '^https://(repo\.anaconda\.com/miniconda|mirrors\.tuna\.tsinghua\.edu\.cn/anaconda/miniconda)/(Miniconda3-[a-zA-Z0-9._-]+)$') {
     $name = $Matches[2]
@@ -310,7 +323,12 @@ function Save-InstDownload([string]$Url, [string]$OutFile, [string]$Sha256 = '',
   foreach ($candidate in (Get-InstDownloadCandidates $Url $Sha256)) {
     $index++
     try {
-      Save-InstDownloadAttempt $candidate $OutFile $Sha256
+      # Small assets should fail fast and move on to the next source.
+      if ($Url -cmatch '^https://[^/?#]+/scripts/(?:cgpu|winmanage|activation)\.(?:ps1|cmd|md)$') {
+        Save-InstDownloadAttempt $candidate $OutFile $Sha256 12 30
+      } else {
+        Save-InstDownloadAttempt $candidate $OutFile $Sha256
+      }
       if ($ResolvedUrl) { $ResolvedUrl.Value = $candidate }
       return
     }
@@ -1349,7 +1367,7 @@ function Show-Banner {
   Write-Host " Shell: $shell | 区域: $(Get-InstRegion)"
   Write-Host " 本地: v$InstVersion | 在线: $(Get-OnlineVersionLabel)"
   if ($script:RemoteVersion -and (Compare-InstVersion $script:RemoteVersion $InstVersion) -gt 0) {
-    Write-Host ' 发现新版本，输入 00 检查 / 更新 inst' -ForegroundColor Yellow
+    Write-Host ' 发现新版本，输入 13 检查 / 更新 inst' -ForegroundColor Yellow
   }
   Write-MenuSeparator
 }
@@ -1369,15 +1387,15 @@ function Write-MainMenu {
   Write-MenuLine 5 'Agents 桌面端'
   Write-MenuLine 6 'Agents 地址配置'
   Write-MenuSection '工具与系统'
-  Write-MenuLine 8 '环境检查'
-  Write-MenuLine 10 'NVIDIA 显卡监控'
-  Write-MenuLine 11 'Windows 系统管理'
-  Write-MenuLine 12 'Windows 激活管理'
+  Write-MenuLine 7 '环境检查'
+  Write-MenuLine 8 'NVIDIA 显卡监控'
+  Write-MenuLine 9 'Windows 系统管理'
+  Write-MenuLine 10 'Windows 激活管理'
   Write-MenuSection '安装与维护'
-  Write-MenuLine 7 '一键安装开发环境'
-  Write-MenuLine 9 '更新已安装工具'
-  Write-MenuLine '00' '检查 / 更新 inst'
-  Write-MenuLine 88 '安装快捷命令'
+  Write-MenuLine 11 '一键安装开发环境'
+  Write-MenuLine 12 '更新已安装工具'
+  Write-MenuLine 13 '检查 / 更新 inst'
+  Write-MenuLine 14 '安装快捷命令'
   Write-MenuSeparator
   Write-MenuLine 0 '退出'
 }
@@ -1517,13 +1535,15 @@ function Show-MainMenu {
       '4' { Show-AgentMenu }
       '5' { Show-DesktopMenu }
       '6' { Show-EndpointMenu }
-      '7' { Invoke-MenuAction { Set-Mirrors; Install-Node; Install-Python; Install-Agents } | Out-Null }
-      '8' { Invoke-MenuAction { Show-Check } | Out-Null }
-      '9' { Invoke-MenuAction { Update-All } | Out-Null }
-      '10' { Invoke-MenuAction { Install-Cgpu } | Out-Null }
-      '11' { Invoke-MenuAction { Install-WindowsManagement } | Out-Null }
-      '12' { Invoke-MenuAction { Install-Activation } | Out-Null }
-      '00' { Show-UpdateMenu }
+      '7' { Invoke-MenuAction { Show-Check } | Out-Null }
+      '8' { Invoke-MenuAction { Install-Cgpu } | Out-Null }
+      '9' { Invoke-MenuAction { Install-WindowsManagement } | Out-Null }
+      '10' { Invoke-MenuAction { Install-Activation } | Out-Null }
+      '11' { Invoke-MenuAction { Set-Mirrors; Install-Node; Install-Python; Install-Agents } | Out-Null }
+      '12' { Invoke-MenuAction { Update-All } | Out-Null }
+      '13' { Show-UpdateMenu }
+      '14' { Invoke-MenuAction { Install-Shortcut } | Out-Null }
+      '00' { Show-UpdateMenu }  # Compatibility aliases for existing automation.
       '88' { Invoke-MenuAction { Install-Shortcut } | Out-Null }
       '0' { $script:ExitMenu = $true }
       'q' { $script:ExitMenu = $true }

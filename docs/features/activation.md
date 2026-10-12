@@ -1,6 +1,6 @@
 # 系统激活：状态与入口
 
-Windows 菜单 **12** / `inst -Activation` 安装 `activation.ps1`、`activation.cmd`、`activation.md` 到 `%USERPROFILE%\.command`，按现有方式加入用户 PATH。该安装动作不激活系统、不打开网页，不需要扩大权限。新开 CMD / PowerShell 后运行 `activation`。兼容 Windows PowerShell 5.1 / PowerShell 7；状态查询与实际打开入口限 Windows 10/11 客户端，不支持 Server。
+Windows 菜单 **10** / `inst -Activation` 安装 `activation.ps1`、`activation.cmd`、`activation.md` 到 `%USERPROFILE%\.command`，按现有方式加入用户 PATH。该安装动作不激活系统、不打开网页，不需要扩大权限。新开 CMD / PowerShell 后运行 `activation`。兼容 Windows PowerShell 5.1 / PowerShell 7；状态查询与实际打开入口限 Windows 10/11 客户端，不支持 Server。
 
 ```powershell
 activation                                     # 默认只读 Windows 状态
