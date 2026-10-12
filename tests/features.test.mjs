@@ -9,17 +9,17 @@ const unix=read('scripts/install-unix.sh');
 const version=read('VERSION').trim();
 assert.ok(win.includes(`$InstVersion = '${version}'`) && unix.includes(`INST_VERSION="${version}"`), 'Release version mismatch');
 for(const key of ['1','2','3','4','5','6','7','8','9','00','88','0']) {
-  assert.match(win,new RegExp(`Write-MenuLine ${key} `));
+  assert.match(win,new RegExp(`Write-MenuLine ['\"]?${key}['\"]? `));
   assert.match(unix,new RegExp(`menu_line ${key} `));
 }
 for(const group of ['开发环境','网络与镜像','AI 工具','常用工具','inst 维护']) {
   assert.ok(win.includes(group) && unix.includes(group),group);
 }
-assert.match(win,/Write-MenuLine 12 '激活管理入口'/);
+assert.match(win,/Write-MenuLine 12 'Windows 激活管理'/);
 assert.match(win,/'12' \{ Invoke-MenuAction \{ Install-Activation \}/);
 assert.match(win,/Write-MenuLine 11 'Windows 系统管理'/);
 assert.match(win,/'11' \{ Invoke-MenuAction \{ Install-WindowsManagement \}/);
-assert.ok(win.includes('[系统管理]') && win.includes('-WindowsManagement'));
+assert.ok(win.includes("Write-MenuSection '工具与系统'") && win.includes('-WindowsManagement'));
 assert.ok(!/menu_line 11 /.test(unix));
 for(const name of ['Install-WindowsManagement','Install-Activation','Install-Cgpu']) {
   assert.equal(win.split(`function ${name} {`).length-1,1,`Duplicate/missing installer: ${name}`);
