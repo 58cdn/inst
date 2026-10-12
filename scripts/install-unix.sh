@@ -2,7 +2,7 @@
 # inst: macOS / Linux / WSL 开发环境安装器。需兼容 macOS 自带的 bash 3.2。
 set -Eeuo pipefail
 
-INST_VERSION="1.1.1"
+INST_VERSION="1.1.2"
 
 # ---------------------------------------------------------------- 默认配置
 DRY_RUN=0; ASSUME_YES=0; INTERACTIVE=0; QUIET=0
