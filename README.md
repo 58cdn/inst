@@ -47,13 +47,13 @@ $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; 
 
 ## 按功能导航
 
-[完整功能分组](docs/features/README.md)：开发环境、网络与镜像、AI 工具、常用工具、系统管理、系统激活、inst 维护。现有菜单编号与 CLI 参数保持兼容；[架构规划](docs/architecture.md) 说明后续最小迁移方式。
+[完整功能分组](docs/features/README.md)：开发环境、网络与镜像、AI 工具、常用工具、系统管理、系统激活、inst 维护。现有 CLI 参数保持兼容；旧版 `00` / `88` 菜单别名仍可输入；[架构规划](docs/architecture.md) 说明后续最小迁移方式。
 
-Windows 菜单 **12** 或 `inst -Activation` 安装默认只读的 `activation` 命令：查询 Windows 激活状态，显式访问微软设置/疑难解答及第三方 MAS 项目参考。不下载或执行激活脚本，不承诺永久激活，激活状态不证明正版许可。见 [已实现功能与限制](docs/features/activation.md)。
+Windows 菜单 **10** 或 `inst -Activation` 安装默认只读的 `activation` 命令：查询 Windows 激活状态，显式访问微软设置/疑难解答及第三方 MAS 项目参考。不下载或执行激活脚本，不承诺永久激活，激活状态不证明正版许可。见 [已实现功能与限制](docs/features/activation.md)。
 
 ## 菜单
 
-主菜单使用单列短标签，分类之间有分割线；详细说明放在子菜单，不使用中文补空格对齐。原有编号及 CLI 参数保持不变，Windows 专属的 10 / 11 / 12 不出现在 Unix 菜单中。
+主菜单使用单列短标签，分类之间有分割线；详细说明放在子菜单，不使用中文补空格对齐。各平台主菜单分别使用从 1 开始的连续编号；Windows 独有的显卡监控、系统管理、激活管理不出现在 Unix 菜单中。CLI 参数保持不变，原来的 `00` / `88` 作为隐藏别名可继续使用。
 
 ```text
  inst  v<本地版本>
@@ -71,15 +71,15 @@ Windows 菜单 **12** 或 `inst -Activation` 安装默认只读的 `activation` 
   5  Agents 桌面端
   6  Agents 地址配置
 ---- [工具与系统] ----
-  8  环境检查
- 10  NVIDIA 显卡监控
- 11  Windows 系统管理
- 12  Windows 激活管理
+  7  环境检查
+  8  NVIDIA 显卡监控
+  9  Windows 系统管理
+ 10  Windows 激活管理
 ---- [安装与维护] ----
-  7  一键安装开发环境
-  9  更新已安装工具
- 00  检查 / 更新 inst
- 88  安装快捷命令
+ 11  一键安装开发环境
+ 12  更新已安装工具
+ 13  检查 / 更新 inst
+ 14  安装快捷命令
 ------------------------------------------------
   0  退出
 ```
@@ -100,9 +100,9 @@ node tools/bump-version.mjs patch
 # 显式调整较大版本：minor 或 major
 ```
 
-菜单每次启动检查一次在线版本；成功与失败都在会话中缓存，`00` → `4` 可以刷新。按当前下载源 → 官网 → GitHub Raw 的顺序回退，每个请求设置 3 秒超时，附带缓存刷新参数；显式设置 `INST_RAW_BASE_URL` 时只使用该源，不跳到公共发布通道。`INST_NO_UPDATE_CHECK=1` 关闭检查。无法获取时显示“在线: 不可用”，不会误报“已是最新版”；`-Version` / `--version` 仍然只输出本地版本，不联网。
+菜单每次启动检查一次在线版本；成功与失败都在会话中缓存，Windows `13` / Unix `10` → `4` 可以刷新。按当前下载源 → 官网 → GitHub Raw 的顺序回退，每个请求设置 3 秒超时，附带缓存刷新参数；显式设置 `INST_RAW_BASE_URL` 时只使用该源，不跳到公共发布通道。`INST_NO_UPDATE_CHECK=1` 关闭检查。无法获取时显示“在线: 不可用”，不会误报“已是最新版”；`-Version` / `--version` 仍然只输出本地版本，不联网。
 
-更新前重新获取清单，从相应源下载并校验脚本版本和语法；清单与脚本版本不一致、下载到旧版本或备份失败时不替换本地脚本。`INST_FORCE_UPDATE=1` 允许重新下载相同版本，但不允许降级。在线版本号大于本地时，通过 `00` → `1` 更新本地快捷命令，再重新运行 `inst`。
+更新前重新获取清单，从相应源下载并校验脚本版本和语法；清单与脚本版本不一致、下载到旧版本或备份失败时不替换本地脚本。`INST_FORCE_UPDATE=1` 允许重新下载相同版本，但不允许降级。在线版本号大于本地时，通过 Windows `13` / Unix `10` → `1` 更新本地快捷命令，再重新运行 `inst`。
 
 ## 功能
 
@@ -166,7 +166,7 @@ API Key 只从环境变量 `INST_API_KEY` 或隐藏输入读取，不接受命�
 
 ### 7. 自动更新
 
-- 启动菜单时读取远端 `VERSION`，有新版本时在横幅提示，输入 `00` 更新。
+- 启动菜单时读取远端 `VERSION`，有新版本时在横幅提示，输入 Windows `13` / Unix `10` 更新。
 - 自更新流程：
   1. 下载到临时文件。
   2. 校验非空、shebang、版本号与语法（PowerShell 做语法解析）。
@@ -184,7 +184,7 @@ API Key 只从环境变量 `INST_API_KEY` 或隐藏输入读取，不接受命�
 
 ### 9. cgpu（Windows NVIDIA 显卡实时监控）
 
-Windows 用户可通过菜单 **10** 或非交互参数 `-Cgpu` 安装：
+Windows 用户可通过菜单 **8** 或非交互参数 `-Cgpu` 安装：
 
 ```powershell
 & ([scriptblock]::Create((irm https://inst.linux.yun/install.ps1))) -Cgpu
@@ -205,7 +205,7 @@ cgpu -Once        # 仅查看一次
 
 ### 10. Windows 系统管理
 
-菜单 **11** 或 `inst -WindowsManagement` 安装 `winmanage`（CMD / PowerShell 5.1 / 7）。默认只读查询；自动更新策略、Defender 实时保护切换与原值恢复均需显式操作、`-Apply` 和新备份路径。`-DryRun` 永远不修改。受管策略、权限不足、篡改防护或不支持版本会阻止修改。不会永久禁更、卸载内置 Defender 或隐藏安全中心。
+菜单 **9** 或 `inst -WindowsManagement` 安装 `winmanage`（CMD / PowerShell 5.1 / 7）。默认只读查询；自动更新策略、Defender 实时保护切换与原值恢复均需显式操作、`-Apply` 和新备份路径。`-DryRun` 永远不修改。受管策略、权限不足、篡改防护或不支持版本会阻止修改。不会永久禁更、卸载内置 Defender 或隐藏安全中心。
 
 用法、恢复步骤、适用边界和微软官方依据见 [Windows 系统管理说明](scripts/winmanage.md)。
 
@@ -299,11 +299,11 @@ node tools/build-site.mjs && node tests/worker.test.mjs
 由 inst 自己发起的安装包、官方安装脚本、入口脚本和自更新下载采用以下边界：
 
 - **连接 / TLS**：Unix curl 单次连接最多 20 秒；Windows HttpClient 的连接阶段包含在下面的 30 秒预算中。
-- **响应头 / 首个有效文件数据**：每个候选源从请求开始共享 30 秒启动预算，重定向不重置预算（最多 5 次，禁止 HTTPS 降级）。HTTP 200、响应头或任意单字节不算下载开始；须收到并检查前 512 字节。小于 512 字节的文件必须在预算内完整结束并通过前缀检查。HTTP 错误、空文件和 HTML/JSON 错误页直接失败；已知脚本（包括小于 512 字节但以 `@echo off` 开始的 CMD）、ZIP/MSIX、EXE 另检查格式前缀。前缀检查不是签名或完整性证明。
-- **下载中无进度**：开始后连续约 120 秒没有新文件数据则失败；Unix 以一秒采样观察文件增长，Windows 每次异步读取独立计时。
+- **响应头 / 首个有效文件数据**：常规下载每个候选源从请求开始共享 30 秒启动预算，Windows 仓库自有小型工具文件使用 12 秒启动预算，重定向不重置预算（最多 5 次，禁止 HTTPS 降级）。HTTP 200、响应头或任意单字节不算下载开始；须收到并检查前 512 字节。小于 512 字节的文件必须在预算内完整结束并通过前缀检查。HTTP 错误、空文件和 HTML/JSON 错误页直接失败；已知脚本（包括小于 512 字节但以 `@echo off` 开始的 CMD）、ZIP/MSIX、EXE 另检查格式前缀。前缀检查不是签名或完整性证明。
+- **下载中无进度**：常规下载开始后连续约 120 秒没有新文件数据则失败（Windows 仓库自有小型工具文件为 30 秒）；Unix 以一秒采样观察文件增长，Windows 每次异步读取独立计时。
 - **整体时限**：大文件没有总时限，持续下载可超过 30 秒。Ctrl+C/终止会取消请求并清理部分文件。CMD 最外层只获取一个很小的 PowerShell 引导脚本，使用 .NET HttpClient（不依赖 curl.exe）并设每个候选 30 秒整体上限；不影响后续大文件。
 
-每个候选只尝试一次，自动映射最多两个源：本项目官网与 `58cdn/inst` GitHub master 的相同入口路径；Miniconda 官方目录与清华 TUNA 的相同文件名。已有节点测速选择继续保留；清单中其他选中节点失败后最多再进入这两个内置源。`INST_RAW_BASE_URL` 显式覆盖及 `INST_MIRROR_AUTO=0` 保留入口单源行为；自动选址通过内部 `INST_SELECTED_BASE_URL` 传给主脚本，不会冒充用户显式覆盖而禁用自更新回退；自定义 URL、代理、含查询参数的 URL 不会自动改写；URL 内凭据被拒绝。错误记录保留候选序号和失败原因。
+每个候选只尝试一次：安装器入口在官网和 `58cdn/inst` GitHub Raw 间回退；Windows 仓库自有工具 `cgpu`、`winmanage`、`activation` 的 `.ps1`、`.cmd`、`.md` 文件可按当前源 → 官网 → GitHub Raw → jsDelivr CDN 回退（去掉重复源，最多四次）；Miniconda 在官方目录和清华 TUNA 的同文件名之间回退。已有节点测速选择继续保留；清单中其他选中节点失败后最多再进入这两个内置源。`INST_RAW_BASE_URL` 显式覆盖及 `INST_MIRROR_AUTO=0` 保留入口单源行为；自动选址通过内部 `INST_SELECTED_BASE_URL` 传给主脚本，不会冒充用户显式覆盖而禁用自更新回退；自定义 URL、代理、含查询参数的 URL 不会自动改写；URL 内凭据被拒绝。错误记录保留候选序号和失败原因。
 
 Miniconda 安装前从[Anaconda 官方目录](https://repo.anaconda.com/miniconda/)取得对应架构文件的 SHA256，两站必须匹配同一摘要（包括 `latest`），镜像未同步则失败后切换。无法取得官方摘要时停止安装，不降低校验要求。清华镜像的覆盖及维护方见 [TUNA 官方说明](https://mirrors.tuna.tsinghua.edu.cn/help/anaconda/)。不添加通用 GitHub 代理，不向其他站点发送自定义地址或凭据。下载成功并校验后才替换目标文件；Windows 已有文件通过同卷 `File.Replace` 替换，目标锁定导致替换失败时保留旧文件；失败保留已有目标，删除此次临时文件。系统安装器原有签名检查继续由系统执行。官方 PowerShell 脚本保留原始下载字节，严格 UTF-8 解码及语法检查后另生成带 BOM 的临时执行副本，兼容 PowerShell 5.1 的中文脚本。
 
