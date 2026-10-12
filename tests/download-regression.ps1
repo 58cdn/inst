@@ -264,4 +264,32 @@ Write-Output 'bootstrap-child-ok'
   catch { $exhausted = $_.Exception.Message -match 'exhausted.*SHA256 mismatch.*SHA256 mismatch' }
   if (-not $exhausted -or $script:calls -ne 2) { throw 'bounded exhaustion/reasons failed' }
   Write-Host 'PASS: mirror policy, success and exhaustion'
+  # Repository helper downloads retry the exact file from trusted alternate publishers.
+  $helper = 'https://inst.linux.yun/scripts/cgpu.ps1'
+  $expected = @($helper, 'https://raw.githubusercontent.com/58cdn/inst/master/scripts/cgpu.ps1', 'https://cdn.jsdelivr.net/gh/58cdn/inst@master/scripts/cgpu.ps1')
+  $actual = @(Get-InstDownloadCandidates $helper)
+  if (($actual -join '|') -cne ($expected -join '|')) { throw "unexpected helper fallbacks: $($actual -join ', ')" }
+  $env:INST_SELECTED_BASE_URL = 'https://mirror.example'
+  $selectedCandidates = @(Get-InstDownloadCandidates 'https://mirror.example/scripts/cgpu.ps1')
+  if ($selectedCandidates.Count -ne 4 -or $selectedCandidates[1] -cne $helper) { throw 'selected mirror did not fall back to trusted publishers' }
+  $env:INST_SELECTED_BASE_URL = $null
+  $env:INST_RAW_BASE_URL = 'https://manual.example'
+  if (@(Get-InstDownloadCandidates $helper).Count -ne 1) { throw 'explicit source unexpectedly fell back' }
+  $env:INST_RAW_BASE_URL = $null
+  foreach ($unsafe in @('https://inst.linux.yun/scripts/cgpu.ps1?token=abc', 'https://inst.linux.yun/scripts/unknown.ps1', 'https://untrusted.example/scripts/cgpu.ps1')) {
+    if (@(Get-InstDownloadCandidates $unsafe).Count -ne 1) { throw "unexpected URL rewrite: $unsafe" }
+  }
+  $script:attempted = @()
+  function Save-InstDownloadAttempt {
+    param($Url,$OutFile,$Sha256,$StartSeconds,$IdleSeconds)
+    $script:attempted += $Url
+    if ($StartSeconds -ne 12 -or $IdleSeconds -ne 30) { throw 'unbounded small-asset deadline' }
+    if ($script:attempted.Count -lt 3) { throw 'download start deadline exceeded' }
+    [IO.File]::WriteAllText($OutFile,'fallback success')
+  }
+  Save-InstDownload $helper $out
+  if ($script:attempted.Count -ne 3 -or $script:attempted[2] -cne $expected[2] -or [IO.File]::ReadAllText($out) -ne 'fallback success') {
+    throw 'small-asset download did not recover using the third publisher'
+  }
+  Write-Host 'PASS: bounded helper fallback, alternate CDN, selected mirror and unsafe URL policy'
 } finally { Remove-Item -LiteralPath $dir -Recurse -Force }
