@@ -301,9 +301,11 @@ function Get-InstDownloadCandidates([string]$Url, [string]$Sha256 = '') {
       $path = 'scripts/' + $Matches[1]
       $selectedBase = if ($script:InstBase) { $script:InstBase.TrimEnd('/') } elseif ($env:INST_SELECTED_BASE_URL) { $env:INST_SELECTED_BASE_URL.TrimEnd('/') } else { '' }
       if ($Url -ceq ($official + $path) -or $Url -ceq ($github + $path) -or ($selectedBase -and $Url -ceq ($selectedBase + '/' + $path))) {
-        foreach ($candidate in @($official + $path, $github + $path, 'https://cdn.jsdelivr.net/gh/58cdn/inst@master/' + $path)) {
-          if ($candidate -cne $Url) { $candidate }
-        }
+        # Emit each URL separately; PowerShell 5.1 can otherwise collapse + and comma expressions.
+        if ($Url -cne ($official + $path)) { $official + $path }
+        if ($Url -cne ($github + $path)) { $github + $path }
+        $cdn = 'https://cdn.jsdelivr.net/gh/58cdn/inst@master/' + $path
+        if ($Url -cne $cdn) { $cdn }
       }
     }
   }
