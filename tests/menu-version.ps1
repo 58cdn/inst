@@ -10,11 +10,11 @@ try {
   $env:INST_RAW_BASE_URL = ''; $env:INST_SELECTED_BASE_URL = ''; $env:INST_FORCE_UPDATE = ''
   . (Join-Path $root 'scripts/install-windows.ps1') -LibOnly
   New-Item -ItemType Directory -Path $scratch | Out-Null
-  $menu = (Write-MainMenu 6>&1 | Out-String)
-  $keys = @([regex]::Matches($menu, '(?m)^ *([0-9]+)  ') | ForEach-Object { $_.Groups[1].Value }) -join ','
+  $menuText = (Write-MainMenu 6>&1 | Out-String)
+  $keys = @([regex]::Matches($menuText, '(?m)^ *([0-9]+)  ') | ForEach-Object { $_.Groups[1].Value }) -join ','
   Assert ($keys -ceq '1,2,3,4,5,6,8,10,11,12,7,9,00,88,0') "Menu keys: $keys"
-  Assert (([regex]::Matches($menu, '(?m)^---- \[')).Count -eq 5) 'Missing category separators'
-  Assert (-not $menu.Contains('pyenv') -and -not $menu.Contains('Hermes')) 'Main menu contains long hints'
+  Assert (([regex]::Matches($menuText, '(?m)^---- \[')).Count -eq 5) 'Missing category separators'
+  Assert (-not $menuText.Contains('pyenv') -and -not $menuText.Contains('Hermes')) 'Main menu contains long hints'
   $hint = Write-MenuLine 2 'Python 环境' 'pyenv / Python' 6>&1 | Out-String
   Assert ($hint -match 'Python 环境\r?\n     pyenv / Python') 'Submenu hint is not on its own line'
   Assert ((Compare-InstVersion '1.2.10' '1.2.9') -gt 0) 'Numeric comparison'
