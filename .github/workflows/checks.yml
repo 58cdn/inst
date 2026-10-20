@@ -19,6 +19,9 @@ jobs:
           if command -v dash >/dev/null; then dash -n install.sh; fi
           if command -v zsh >/dev/null; then zsh -n install.zsh; fi
           bash -n scripts/install-unix.sh
+          bash -n scripts/pve-tools.sh
+          bash scripts/pve-tools.sh --help >/dev/null
+          if bash scripts/pve-tools.sh audit >/dev/null 2>&1; then echo 'PVE host check unexpectedly passed on CI'; exit 1; fi
           node --check tools/update-versions.mjs
           node tools/embed-download.mjs --check
           node tools/bump-version.mjs --check
