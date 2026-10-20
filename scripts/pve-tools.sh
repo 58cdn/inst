@@ -112,6 +112,7 @@ pci_attach(){
 disk_attach(){
   local id="${1:-}" disk="${2:-}" slot target
   is_id "$id" || error 'Invalid VM ID'
+  [[ "${PVE_ALLOW_DISK_ATTACH:-0}" == 1 ]] || error 'Whole-disk passthrough requires explicit PVE_ALLOW_DISK_ATTACH=1 after checking host storage'
   [[ "$disk" == /dev/disk/by-id/* && "$disk" != *..* ]] || error 'Only /dev/disk/by-id/* is accepted'
   [[ -L "$disk" ]] || error 'Disk identifier not found'
   target="$(readlink -f "$disk")"
