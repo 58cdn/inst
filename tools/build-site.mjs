@@ -10,7 +10,7 @@ const dist = join(root, 'dist');
 // [source, path in dist]
 const files = [
   ['install.sh'], ['install.zsh'], ['install.ps1'], ['install.cmd'], ['VERSION'], ['README.md'], ['mirrors.json'],
-  ['scripts/install-unix.sh'], ['scripts/install-windows.ps1'],
+  ['scripts/install-unix.sh'], ['scripts/install-windows.ps1'], ['scripts/pve-tools.sh'],
   ['scripts/activation.ps1'], ['scripts/activation.cmd'], ['scripts/activation.md'],
   ['docs/architecture.md'],
   ['docs/features/README.md'],
@@ -21,6 +21,7 @@ const files = [
   ['docs/features/activation.md'],
   ['docs/features/maintenance.md'],
   ['docs/features/system.md'],
+  ['docs/features/pve.md'],
   ['scripts/winmanage.ps1'], ['scripts/winmanage.cmd'], ['scripts/winmanage.md'],
   ['scripts/cgpu.ps1'], ['scripts/cgpu.cmd'], ['scripts/cgpu.md'],
   ['site/index.html', 'index.html'], ['site/_headers', '_headers'],
