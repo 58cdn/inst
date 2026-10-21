@@ -21,6 +21,7 @@ jobs:
           bash -n scripts/install-unix.sh
           bash -n scripts/pve-tools.sh
           bash scripts/pve-tools.sh --help >/dev/null
+          if [ "$(uname -s)" = Linux ]; then bash tests/pve-regression.sh; fi
           if bash scripts/pve-tools.sh audit >/dev/null 2>&1; then echo 'PVE host check unexpectedly passed on CI'; exit 1; fi
           node --check tools/update-versions.mjs
           node tools/embed-download.mjs --check
