@@ -9,7 +9,9 @@
 - **虚拟机清单**：`qm list`。
 - **从已有 PVE 模板创建 VM**：使用 `qm clone --full 1`，要求模板已停止，校验目标 VMID 和名称。创建后默认不启动。
 - **PCI 直通**：对已停止 VM 使用 `qm set --hostpciN`，验证 PCI BDF、IOMMU 分组、空闲槽位、已分配状态，操作前备份 VM 配置。
-- **整盘挂载**：使用 `/dev/disk/by-id/*` 指向的整盘，拒绝常见挂载中、LVM PV、device-mapper/RAID holder 的磁盘，操作前备份 VM 配置。**默认禁止操作，管理员核实用途后还须显式设置 `PVE_ALLOW_DISK_ATTACH=1`**。
+- **整盘挂载**：使用 `/dev/disk/by-id/*` 指向的整盘，拒绝常见挂载中、LVM PV、device-mapper/RAID holder 的磁盘，操作前备份 VM 配置。**默认禁止操作，管理员核实用途后还须同时设置 `PVE_ALLOW_DISK_ATTACH=1` 和 `PVE_ALLOW_HOST_CHANGES=1`**。另外拒绝有文件系统、存储签名或 LVM PV 的整盘。
+- **cloud-init SSH 配置**：仅在停止且已连接 cloud-init drive 的 VM 上设置用户名及公开 SSH Key，不处理私钥和密码。
+- **备份查阅与 SR-IOV 检查**：展示配置备份、设备支持的 VF 数量，不自动变更 PF/VF。
 - **vGPU 诊断**：检查 NVIDIA 驱动及 `nvidia_vgpu_vfio` 状态；不自动下载非官方驱动或绕过许可。
 - **预览与确认**：`PVE_DRY_RUN=1` 不执行 VM 修改；每个实际写入步骤要求输入 `APPLY`，自动化调用可以设置 `PVE_YES=1`，但不绕过前置检查。
 
@@ -26,9 +28,12 @@ sudo bash pve-tools.sh audit
 sudo bash pve-tools.sh devices
 sudo bash pve-tools.sh vms
 sudo bash pve-tools.sh vm-clone 9000 120 ubuntu-test
-sudo bash pve-tools.sh passthrough 120 0000:05:00.0
-sudo PVE_ALLOW_DISK_ATTACH=1 bash pve-tools.sh disk-attach 120 /dev/disk/by-id/ata-EXAMPLE
+sudo PVE_ALLOW_HOST_CHANGES=1 bash pve-tools.sh passthrough 120 0000:05:00.0
+sudo PVE_ALLOW_HOST_CHANGES=1 PVE_ALLOW_DISK_ATTACH=1 bash pve-tools.sh disk-attach 120 /dev/disk/by-id/ata-EXAMPLE
 sudo bash pve-tools.sh vgpu
+sudo bash pve-tools.sh sriov
+sudo bash pve-tools.sh recovery 120
+sudo bash pve-tools.sh vm-cloudinit 120 ubuntu /root/.ssh/id_ed25519.pub
 ```
 
 `PVE_DRY_RUN=1` 应用于独立模块的写入命令；注意主入口 `inst --pve --dry-run` **只预览模块下载，不进入交互菜单**。
