@@ -15,7 +15,7 @@ param(
   [string]$ClaudeDesktopArgs
 )
 
-$InstVersion = '1.1.2'
+$InstVersion = '1.1.3'
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
