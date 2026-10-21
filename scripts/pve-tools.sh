@@ -157,8 +157,7 @@ vm_cloudinit(){
   [[ "$user" =~ ^[A-Za-z_][A-Za-z0-9_-]{0,31}$ ]] || error 'Invalid cloud-init user'
   [[ -f "$keyfile" && ! -L "$keyfile" ]] || error 'Expected regular SSH public-key file'
   [[ "$(wc -c < "$keyfile")" -le 16384 ]] || error 'SSH key file too large'
-  grep -Eq '^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/=]+([[:space:]].*)?$'
- "$keyfile" || error 'Invalid SSH public key'
+  grep -Eq '^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/=]+([[:space:]].*)?$' "$keyfile" || error 'Invalid SSH public key'
   vm_exists "$id" || error 'VM not found'
   vm_stopped "$id"
   qm config "$id" | grep -Eq '^ide[0-3]: .*cloudinit|^scsi[0-9]+: .*cloudinit|^sata[0-5]: .*cloudinit' || error 'No cloud-init drive attached'
