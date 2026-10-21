@@ -8,10 +8,13 @@ Usage: pve-tools.sh COMMAND [arguments]
   audit                       Read-only host, IOMMU and GPU capability report
   devices                     List PCI and persistent disk identifiers
   vms                         List current virtual machines
-  vm-clone TEMPLATE_ID NEW_ID NAME  Clone a stopped template and optionally start it
+  vm-clone TEMPLATE_ID NEW_ID NAME  Clone stopped template; VM is not started
+  vm-cloudinit VMID USER KEYFILE   Configure cloud-init SSH key on stopped VM
   passthrough VMID PCI_BDF     Add one PCI device to a stopped VM (confirmation required)
   disk-attach VMID DISK_BY_ID  Attach one whole disk to a stopped VM (confirmation required)
   vgpu                        Read-only NVIDIA vGPU prerequisites and status
+  sriov                       Read-only network SR-IOV capabilities
+  recovery VMID               List recent config backups
   menu                        Interactive menu
 Environment: PVE_DRY_RUN=1 previews mutations; PVE_YES=1 skips prompts (not safety checks).
 Always back up the VM and host before changing hardware or kernel settings.
@@ -27,6 +30,7 @@ require_host(){
   command -v qm >/dev/null 2>&1 || error 'qm missing: run on a PVE host'
 }
 require_root(){ [[ "$(id -u)" == 0 ]] || error 'Run as root on the PVE host'; }
+require_optin(){ [[ "${PVE_ALLOW_HOST_CHANGES:-0}" == 1 ]] || error 'Set PVE_ALLOW_HOST_CHANGES=1 to explicitly allow hardware changes'; }
 confirm(){
   [[ "${PVE_DRY_RUN:-0}" == 1 ]] && { info "DRY RUN: $*"; return 1; }
   [[ "${PVE_YES:-0}" == 1 ]] && return 0
@@ -104,6 +108,7 @@ pci_attach(){
   if grep -qE "(^|,)host=${pci#0000:}" /etc/pve/qemu-server/*.conf 2>/dev/null; then error 'PCI device appears assigned to a VM'; fi
   slot="$(next_slot "$id" hostpci)"
   info "Will add $pci as $slot to VM $id. Passing through a NIC/GPU can disconnect the host."
+  require_optin
   confirm 'attach PCI device' || return 0
   backup_conf "$id"
   qm set "$id" --"$slot" "$pci,pcie=1"
@@ -117,19 +122,104 @@ disk_attach(){
   [[ -L "$disk" ]] || error 'Disk identifier not found'
   target="$(readlink -f "$disk")"
   [[ -b "$target" ]] || error 'Target is not a block device'
+  command -v lsblk >/dev/null 2>&1 || error 'lsblk is required'
+  command -v pvs >/dev/null 2>&1 || error 'pvs is required to verify storage safety'
   [[ "$target" =~ ^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|vd[a-z]+)$ ]] || error 'Whole physical disk required'
   vm_exists "$id" || error 'VM not found'
   vm_stopped "$id"
   if lsblk -nrpo MOUNTPOINT "$target" | grep -q '[^[:space:]]'; then error 'Disk or a partition is mounted'; fi
-  if pvs --noheadings -o pv_name 2>/dev/null | grep -Fqx "$target"; then error 'Disk is an LVM physical volume'; fi
-  if findmnt -rn -o SOURCE | grep -Fq "$target"; then error 'Disk is used by the host'; fi
+  local pv
+  while IFS= read -r pv; do
+    pv="${pv//[[:space:]]/}"
+    [[ -n "$pv" ]] || continue
+    if lsblk -nrpo NAME "$target" | grep -Fxq "$pv"; then error "LVM physical volume on disk: $pv"; fi
+  done < <(pvs --noheadings -o pv_name)
+  if lsblk -nrpo FSTYPE "$target" | grep -q '[^[:space:]]'; then error 'Disk contains filesystem, RAID, swap or storage signatures'; fi
+  if lsblk -nrpo TYPE "$target" | grep -Eq 'raid|crypt|lvm'; then error 'Disk participates in host storage'; fi
+  if command -v zpool >/dev/null 2>&1 && zpool status -P 2>/dev/null | grep -Fq "$target"; then error 'Disk participates in ZFS'; fi
+  if grep -Fq "$target" /proc/swaps; then error 'Disk is used for swap'; fi
   # Any holder (mdraid, dm-crypt, LVM, multipath) makes whole-disk passthrough unsafe.
   if find "/sys/class/block/${target##*/}/holders" -mindepth 1 -print -quit | grep -q .; then error 'Disk has active device-mapper/RAID holders'; fi
+  if grep -Fl -- "$disk" /etc/pve/qemu-server/*.conf 2>/dev/null | grep -q .; then error 'Disk is referenced by another VM'; fi
   slot="$(next_slot "$id" scsi)"
   info "Will attach $disk ($target) to VM $id as $slot; guest can ERASE ALL data."
+  require_optin
   confirm 'attach whole disk' || return 0
   backup_conf "$id"
   qm set "$id" --"$slot" "$disk"
+}
+vm_cloudinit(){
+  local id="${1:-}" user="${2:-}" keyfile="${3:-}"
+  is_id "$id" || error 'Invalid VM ID'
+  [[ "$user" =~ ^[A-Za-z_][A-Za-z0-9_-]{0,31}$ ]] || error 'Invalid cloud-init user'
+  [[ -f "$keyfile" && ! -L "$keyfile" ]] || error 'Expected regular SSH public-key file'
+  [[ "$(wc -c < "$keyfile")" -le 16384 ]] || error 'SSH key file too large'
+  grep -Eq '^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/=]+([[:space:]].*)?
+  audit
+  if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi -L || true; else info 'nvidia-smi absent'; fi
+  if lsmod | grep -Eq '^nvidia_vgpu_vfio '; then info 'nvidia_vgpu_vfio loaded'; else info 'vGPU host driver not loaded'; fi
+  info 'vGPU provisioning is NOT automated: GPU/driver/license/kernel and mdev compatibility must be checked individually.'
+  info 'GTX model series alone does not guarantee official NVIDIA vGPU support.'
+}
+menu(){
+  local c id pci disk name template
+  while true; do
+    printf '\n--- PVE tools v%s ---\n1  Host audit\n2  PCI/disk inventory\n3  List VMs\n4  Clone template\n5  PCI passthrough\n6  Whole-disk attach\n7  vGPU diagnostics\n8  SR-IOV devices\n9  Cloud-init SSH setup\n10 List backups\n0  Exit\n' "$VERSION"
+    read -r -p 'Choice: ' c || return 0
+    case "$c" in
+      1) audit;; 2) devices;; 3) vms;;
+      4) read -r -p 'Template VM ID: ' template; read -r -p 'New VM ID: ' id; read -r -p 'New name: ' name; vm_clone "$template" "$id" "$name";;
+      5) read -r -p 'Stopped VM ID: ' id; read -r -p 'PCI BDF: ' pci; pci_attach "$id" "$pci";;
+      6) read -r -p 'Stopped VM ID: ' id; read -r -p 'Disk /dev/disk/by-id/...: ' disk; disk_attach "$id" "$disk";;
+      7) vgpu;; 8) sriov;;
+      9) read -r -p 'Stopped VM ID: ' id; read -r -p 'Cloud-init user: ' name; read -r -p 'SSH public-key file: ' disk; vm_cloudinit "$id" "$name" "$disk";;
+      10) read -r -p 'VM ID: ' id; recovery "$id";;
+      0) return 0;; *) info 'Unknown option';;
+    esac
+  done
+}
+main(){
+  case "${1:-menu}" in
+    --help|-h|help) usage; return;;
+    audit|devices|vms|vgpu|sriov|recovery|menu|vm-clone|vm-cloudinit|passthrough|disk-attach) ;;
+    *) usage; error 'Unknown command';;
+  esac
+  require_host
+  case "${1:-menu}" in
+    audit) audit;; devices) devices;; vms) vms;; vgpu) vgpu;;
+    vm-clone) require_root; vm_clone "${2:-}" "${3:-}" "${4:-}";;
+    passthrough) require_root; pci_attach "${2:-}" "${3:-}";;
+    disk-attach) require_root; disk_attach "${2:-}" "${3:-}";;
+    vm-cloudinit) require_root; vm_cloudinit "${2:-}" "${3:-}" "${4:-}";;
+    sriov) sriov;; recovery) recovery "${2:-}";;
+    menu) require_root; menu;;
+  esac
+}
+main "$@"
+ "$keyfile" || error 'Invalid SSH public key'
+  vm_exists "$id" || error 'VM not found'
+  vm_stopped "$id"
+  qm config "$id" | grep -Eq '^ide[0-3]: .*cloudinit|^scsi[0-9]+: .*cloudinit|^sata[0-5]: .*cloudinit' || error 'No cloud-init drive attached'
+  info "Will set cloud-init user and public key on VM $id"
+  confirm 'configure cloud-init SSH' || return 0
+  backup_conf "$id"
+  qm set "$id" --ciuser "$user" --sshkeys "$keyfile"
+}
+sriov(){
+  info 'Read-only SR-IOV devices:'
+  local p total current
+  for p in /sys/bus/pci/devices/*/sriov_totalvfs; do
+    [[ -f "$p" ]] || continue
+    total="$(cat "$p")"; current="$(cat "${p%sriov_totalvfs}sriov_numvfs")"
+    printf '%s total=%s enabled=%s\n' "${p%/sriov_totalvfs}" "$total" "$current"
+  done
+}
+recovery(){
+  local id="${1:-}" dir=/var/lib/vz/snippets/inst-pve-backups
+  is_id "$id" || error 'Invalid VM ID'
+  [[ -d "$dir" ]] || error 'No configuration backups'
+  find "$dir" -maxdepth 1 -type f -name "$id.*.conf" -printf '%f\n' | sort -r | head -n 10
+  info 'Restore is intentionally manual after independent VM backup.'
 }
 vgpu(){
   audit
