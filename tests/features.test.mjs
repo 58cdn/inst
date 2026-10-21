@@ -22,17 +22,20 @@ assert.match(win,/'10' \{ Invoke-MenuAction \{ Install-Activation \}/);
 assert.match(win,/Write-MenuLine 9 'Windows 系统管理'/);
 assert.match(win,/'9' \{ Invoke-MenuAction \{ Install-WindowsManagement \}/);
 assert.ok(win.includes("Write-MenuSection '工具与系统'") && win.includes('-WindowsManagement'));
-assert.ok(!/menu_line 12 /.test(unix));
+assert.match(unix,/menu_line 12 'PVE 虚拟机与直通工具'/);
+assert.match(unix,/--pve\) DO_PVE=1/);
+assert.match(unix,/have pveversion/);
 for(const name of ['Install-WindowsManagement','Install-Activation','Install-Cgpu']) {
   assert.equal(win.split(`function ${name} {`).length-1,1,`Duplicate/missing installer: ${name}`);
 }
 assert.ok(!/menu_line 13 /.test(unix));
+assert.ok(!/DO_PVE/.test(unix.match(/all_in_one\(\)\{[^}]+\}/)[0]));
 const all=win.match(/if \(\$All\) \{([^}]+)\}/)[1];
 assert.ok(!/Activation|Cgpu|WindowsManagement/.test(all));
 assert.match(unix,/all_in_one\(\)\{ install_node; install_python; configure_mirrors; install_agents; \}/);
 const activation=read('scripts/activation.ps1');
 assert.ok(!/Invoke-Expression|Invoke-WebRequest|Invoke-RestMethod|DownloadString|Invoke-CimMethod|slmgr|ospp|Set-MpPreference|Set-ItemProperty/i.test(activation));
-for(const file of ['VERSION','install.sh','install.zsh','install.ps1','install.cmd','scripts/install-unix.sh','scripts/install-windows.ps1','scripts/cgpu.ps1','scripts/cgpu.cmd','scripts/cgpu.md','scripts/activation.ps1','scripts/activation.cmd','scripts/activation.md','scripts/winmanage.ps1','scripts/winmanage.cmd','scripts/winmanage.md','docs/architecture.md',...['README','runtime','mirrors','agents','tools','activation','system','maintenance'].map(n=>`docs/features/${n}.md`)]) {
+for(const file of ['VERSION','install.sh','install.zsh','install.ps1','install.cmd','scripts/install-unix.sh','scripts/install-windows.ps1','scripts/cgpu.ps1','scripts/cgpu.cmd','scripts/cgpu.md','scripts/activation.ps1','scripts/activation.cmd','scripts/activation.md','scripts/winmanage.ps1','scripts/winmanage.cmd','scripts/winmanage.md','docs/architecture.md',...['README','runtime','mirrors','agents','tools','activation','system','maintenance','pve'].map(n=>`docs/features/${n}.md`)]) {
   assert.ok(existsSync(resolve(root,'dist',file)),`Missing published path: ${file}`);
   assert.deepEqual(readFileSync(resolve(root,file)),readFileSync(resolve(root,'dist',file)),`Published bytes differ: ${file}`);
 }

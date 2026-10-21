@@ -7,7 +7,7 @@ INST_VERSION="1.1.2"
 # ---------------------------------------------------------------- 默认配置
 DRY_RUN=0; ASSUME_YES=0; INTERACTIVE=0; QUIET=0
 DO_NODE=0; DO_PYTHON=0; DO_MIRRORS=0; DO_AGENTS=0; DO_DESKTOP=0; DO_ENDPOINT=0
-DO_CHECK=0; DO_UPDATE=0; DO_SELF_UPDATE=0; DO_SHORTCUT=0; DO_MENU=0
+DO_CHECK=0; DO_UPDATE=0; DO_SELF_UPDATE=0; DO_SHORTCUT=0; DO_MENU=0; DO_PVE=0
 APPLY_SYSTEM_MIRROR=0; WITH_BUILD_DEPS=0
 BASE_URL="${INST_RAW_BASE_URL:-${INST_SELECTED_BASE_URL:-https://inst.linux.yun}}"
 PREFIX="${INST_PREFIX:-$HOME/.local/inst}"
@@ -1177,6 +1177,24 @@ auto_update(){
   fi
 }
 
+# ---------------------------------------------------------------- PVE host tools
+pve_tools(){
+  [[ "$PLATFORM" == Linux && "$IS_WSL" == 0 ]] || { err 'PVE 工具仅支持 Linux PVE 宿主机'; return 2; }
+  have pveversion && have qm || { err '未检测到 PVE 宿主机 (pveversion/qm)'; return 2; }
+  local temp rc=0
+  if ((DRY_RUN)); then
+    log '预览：下载 scripts/pve-tools.sh 并执行 PVE_DRY_RUN=1 的只读菜单'
+    return 0
+  fi
+  temp="$(mktemp)" || return 1
+  if ! inst_download "$BASE_URL/scripts/pve-tools.sh" "$temp"; then
+    rm -f "$temp"; return 1
+  fi
+  bash -n "$temp" || { rm -f "$temp"; err 'PVE 模块语法校验失败'; return 1; }
+  PVE_DRY_RUN="$DRY_RUN" bash "$temp" menu || rc=$?
+  rm -f "$temp"
+  return "$rc"
+}
 # ---------------------------------------------------------------- 菜单
 menu_separator(){ printf '%s\n' '------------------------------------------------'; }
 menu_section(){ printf '%s---- [%s] ----%s\n' "$C_C" "$1" "$C_0"; }
@@ -1212,6 +1230,7 @@ main_menu_content(){
   menu_line 9 '更新已安装工具'
   menu_line 10 '检查 / 更新 inst'
   menu_line 11 '安装快捷命令'
+  if [[ "$PLATFORM" == Linux && "$IS_WSL" == 0 ]] && have pveversion; then menu_line 12 'PVE 虚拟机与直通工具'; fi
   menu_separator
   menu_line 0 '退出'
 }
@@ -1362,6 +1381,7 @@ main_menu(){
       9) run_action update_all;;
       10) menu_update;;
       11) run_action install_shortcut;;
+      12) run_action pve_tools;;
       00) menu_update;;  # Compatibility aliases.
       88) run_action install_shortcut;;
       0|q|exit) printf '再见\n'; exit 0;;
@@ -1393,6 +1413,7 @@ inst 维护:
   --update               更新已安装的工具与 Agents
   --self-update          更新本脚本（快捷命令模式）
   --install-shortcut     安装快捷命令 ~/.local/bin/$SHORTCUT_NAME
+  --pve                  在 PVE 宿主机打开虚拟机与直通工具
   --menu                 强制打开菜单
 
 选项:
@@ -1426,7 +1447,7 @@ parse_args(){
       --all) DO_NODE=1; DO_PYTHON=1; DO_MIRRORS=1; DO_AGENTS=1;;
       --node) DO_NODE=1;; --python) DO_PYTHON=1;; --mirrors) DO_MIRRORS=1;; --agents) DO_AGENTS=1;;
       --desktop) DO_DESKTOP=1;; --check) DO_CHECK=1;; --update) DO_UPDATE=1;; --self-update) DO_SELF_UPDATE=1;;
-      --install-shortcut) DO_SHORTCUT=1;; --menu) DO_MENU=1;;
+      --install-shortcut) DO_SHORTCUT=1;; --menu) DO_MENU=1;; --pve) DO_PVE=1;;
       --official-agents) DO_AGENTS=1; AGENT_METHOD=official;;
       --apply-system-mirror) APPLY_SYSTEM_MIRROR=1;; --with-build-deps) WITH_BUILD_DEPS=1;;
       --dry-run) DRY_RUN=1;; -y|--yes) ASSUME_YES=1;; -q|--quiet) QUIET=1;;
@@ -1463,10 +1484,11 @@ main(){
   parse_args "$@"
   [[ "$PLATFORM" != Windows ]] || die "Windows 请在 PowerShell 中运行: irm $BASE_URL/install.ps1 | iex" 1
   if ((DO_MENU)) || (( ! DO_NODE && ! DO_PYTHON && ! DO_MIRRORS && ! DO_AGENTS && ! DO_DESKTOP && ! DO_ENDPOINT \
-        && ! DO_CHECK && ! DO_UPDATE && ! DO_SELF_UPDATE && ! DO_SHORTCUT )); then
+        && ! DO_CHECK && ! DO_UPDATE && ! DO_SELF_UPDATE && ! DO_SHORTCUT && ! DO_PVE )); then
     if ((HAS_TTY)); then main_menu; fi
     usage; exit 2
   fi
+  ((DO_PVE)) && { pve_tools; exit $?; }
   ((DO_CHECK)) && { check_installation; exit 0; }
   if ((DO_SELF_UPDATE)); then self_update; exit $?; fi
   ((QUIET)) || log "检测到 $(platform_label)，shell: $LOGIN_SHELL"

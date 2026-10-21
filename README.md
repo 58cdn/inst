@@ -45,6 +45,10 @@ $env:INST_RAW_BASE_URL = 'https://raw.githubusercontent.com/58cdn/inst/master'; 
 - 清单获取失败、节点探测超时、节点返回错误或全部节点不可用时，继续使用 `https://inst.linux.yun`；只有后续实际下载也失败时才按原流程报错。
 - `mirrors.json` 是官网发布的节点清单，新增节点必须提供与站点相同的静态路径（至少包含 `VERSION`、`scripts/` 和入口脚本）。
 
+## PVE 虚拟化（实验性）
+
+PVE 宿主机可以通过 `inst --pve` 或动态菜单项打开 [PVE 虚拟机与直通工具](docs/features/pve.md)，目前支持 IOMMU/PCI/磁盘只读检测、已有模板全量克隆、停止 VM 的 PCI/整盘直通、NVIDIA vGPU 诊断。写入需确认并备份 VM 配置；vGPU 驱动部署和多操作系统 ISO 自动安装尚未实现，硬件兼容不保证。
+
 ## 按功能导航
 
 [完整功能分组](docs/features/README.md)：开发环境、网络与镜像、AI 工具、常用工具、系统管理、系统激活、inst 维护。现有 CLI 参数保持兼容；旧版 `00` / `88` 菜单别名仍可输入；[架构规划](docs/architecture.md) 说明后续最小迁移方式。
