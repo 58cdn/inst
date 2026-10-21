@@ -29,7 +29,10 @@ require_host(){
   command -v pveversion >/dev/null 2>&1 || error 'pveversion missing: run on a PVE host'
   command -v qm >/dev/null 2>&1 || error 'qm missing: run on a PVE host'
 }
-require_root(){ [[ "$(id -u)" == 0 ]] || error 'Run as root on the PVE host'; }
+require_root(){
+  [[ "${PVE_DRY_RUN:-0}" == 1 ]] && return 0
+  [[ "$(id -u)" == 0 ]] || error 'Run as root on the PVE host'
+}
 require_optin(){ [[ "${PVE_ALLOW_HOST_CHANGES:-0}" == 1 ]] || error 'Set PVE_ALLOW_HOST_CHANGES=1 to explicitly allow hardware changes'; }
 confirm(){
   [[ "${PVE_DRY_RUN:-0}" == 1 ]] && { info "DRY RUN: $*"; return 1; }
