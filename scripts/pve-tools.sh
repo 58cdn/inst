@@ -157,7 +157,33 @@ vm_cloudinit(){
   [[ "$user" =~ ^[A-Za-z_][A-Za-z0-9_-]{0,31}$ ]] || error 'Invalid cloud-init user'
   [[ -f "$keyfile" && ! -L "$keyfile" ]] || error 'Expected regular SSH public-key file'
   [[ "$(wc -c < "$keyfile")" -le 16384 ]] || error 'SSH key file too large'
-  grep -Eq '^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/=]+([[:space:]].*)?
+  grep -Eq '^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/=]+([[:space:]].*)?$'
+ "$keyfile" || error 'Invalid SSH public key'
+  vm_exists "$id" || error 'VM not found'
+  vm_stopped "$id"
+  qm config "$id" | grep -Eq '^ide[0-3]: .*cloudinit|^scsi[0-9]+: .*cloudinit|^sata[0-5]: .*cloudinit' || error 'No cloud-init drive attached'
+  info "Will set cloud-init user and public key on VM $id"
+  confirm 'configure cloud-init SSH' || return 0
+  backup_conf "$id"
+  qm set "$id" --ciuser "$user" --sshkeys "$keyfile"
+}
+sriov(){
+  info 'Read-only SR-IOV devices:'
+  local p total current
+  for p in /sys/bus/pci/devices/*/sriov_totalvfs; do
+    [[ -f "$p" ]] || continue
+    total="$(cat "$p")"; current="$(cat "${p%sriov_totalvfs}sriov_numvfs")"
+    printf '%s total=%s enabled=%s\n' "${p%/sriov_totalvfs}" "$total" "$current"
+  done
+}
+recovery(){
+  local id="${1:-}" dir=/var/lib/vz/snippets/inst-pve-backups
+  is_id "$id" || error 'Invalid VM ID'
+  [[ -d "$dir" ]] || error 'No configuration backups'
+  find "$dir" -maxdepth 1 -type f -name "$id.*.conf" -printf '%f\n' | sort -r | head -n 10
+  info 'Restore is intentionally manual after independent VM backup.'
+}
+vgpu(){
   audit
   if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi -L || true; else info 'nvidia-smi absent'; fi
   if lsmod | grep -Eq '^nvidia_vgpu_vfio '; then info 'nvidia_vgpu_vfio loaded'; else info 'vGPU host driver not loaded'; fi
@@ -195,68 +221,6 @@ main(){
     disk-attach) require_root; disk_attach "${2:-}" "${3:-}";;
     vm-cloudinit) require_root; vm_cloudinit "${2:-}" "${3:-}" "${4:-}";;
     sriov) sriov;; recovery) recovery "${2:-}";;
-    menu) require_root; menu;;
-  esac
-}
-main "$@"
- "$keyfile" || error 'Invalid SSH public key'
-  vm_exists "$id" || error 'VM not found'
-  vm_stopped "$id"
-  qm config "$id" | grep -Eq '^ide[0-3]: .*cloudinit|^scsi[0-9]+: .*cloudinit|^sata[0-5]: .*cloudinit' || error 'No cloud-init drive attached'
-  info "Will set cloud-init user and public key on VM $id"
-  confirm 'configure cloud-init SSH' || return 0
-  backup_conf "$id"
-  qm set "$id" --ciuser "$user" --sshkeys "$keyfile"
-}
-sriov(){
-  info 'Read-only SR-IOV devices:'
-  local p total current
-  for p in /sys/bus/pci/devices/*/sriov_totalvfs; do
-    [[ -f "$p" ]] || continue
-    total="$(cat "$p")"; current="$(cat "${p%sriov_totalvfs}sriov_numvfs")"
-    printf '%s total=%s enabled=%s\n' "${p%/sriov_totalvfs}" "$total" "$current"
-  done
-}
-recovery(){
-  local id="${1:-}" dir=/var/lib/vz/snippets/inst-pve-backups
-  is_id "$id" || error 'Invalid VM ID'
-  [[ -d "$dir" ]] || error 'No configuration backups'
-  find "$dir" -maxdepth 1 -type f -name "$id.*.conf" -printf '%f\n' | sort -r | head -n 10
-  info 'Restore is intentionally manual after independent VM backup.'
-}
-vgpu(){
-  audit
-  if command -v nvidia-smi >/dev/null 2>&1; then nvidia-smi -L || true; else info 'nvidia-smi absent'; fi
-  if lsmod | grep -Eq '^nvidia_vgpu_vfio '; then info 'nvidia_vgpu_vfio loaded'; else info 'vGPU host driver not loaded'; fi
-  info 'vGPU provisioning is NOT automated: GPU/driver/license/kernel and mdev compatibility must be checked individually.'
-  info 'GTX model series alone does not guarantee official NVIDIA vGPU support.'
-}
-menu(){
-  local c id pci disk name template
-  while true; do
-    printf '\n--- PVE tools v%s ---\n1  Host audit\n2  PCI/disk inventory\n3  List VMs\n4  Clone template\n5  PCI passthrough\n6  Whole-disk attach\n7  vGPU diagnostics\n0  Exit\n' "$VERSION"
-    read -r -p 'Choice: ' c || return 0
-    case "$c" in
-      1) audit;; 2) devices;; 3) vms;;
-      4) read -r -p 'Template VM ID: ' template; read -r -p 'New VM ID: ' id; read -r -p 'New name: ' name; vm_clone "$template" "$id" "$name";;
-      5) read -r -p 'Stopped VM ID: ' id; read -r -p 'PCI BDF: ' pci; pci_attach "$id" "$pci";;
-      6) read -r -p 'Stopped VM ID: ' id; read -r -p 'Disk /dev/disk/by-id/...: ' disk; disk_attach "$id" "$disk";;
-      7) vgpu;; 0) return 0;; *) info 'Unknown option';;
-    esac
-  done
-}
-main(){
-  case "${1:-menu}" in
-    --help|-h|help) usage; return;;
-    audit|devices|vms|vgpu|menu|vm-clone|passthrough|disk-attach) ;;
-    *) usage; error 'Unknown command';;
-  esac
-  require_host
-  case "${1:-menu}" in
-    audit) audit;; devices) devices;; vms) vms;; vgpu) vgpu;;
-    vm-clone) require_root; vm_clone "${2:-}" "${3:-}" "${4:-}";;
-    passthrough) require_root; pci_attach "${2:-}" "${3:-}";;
-    disk-attach) require_root; disk_attach "${2:-}" "${3:-}";;
     menu) require_root; menu;;
   esac
 }
